@@ -385,13 +385,13 @@ if __name__ == "__main__":
     BASE_URL = "https://moonboard.com/Account/Login"
 
     options = Options()
-    # options.add_argument("--headless=new")  # or "--headless" if needed
-    # options.add_argument("--disable-gpu")
-    # options.add_argument("--no-sandbox")
-    # options.add_argument("--disable-dev-shm-usage")
-    # options.add_argument("--disable-extensions")
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1280,800")
-    # options.page_load_strategy = "eager"
+    options.page_load_strategy = "eager"
 
     # Dictionary with the following structure:
     # {
