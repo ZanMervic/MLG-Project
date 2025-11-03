@@ -1,8 +1,10 @@
 from PIL import Image
 from collections import Counter
 import numpy as np
-
-path = "Screenshots/3COIN_screenshot.png"
+import json
+import os
+import tqdm
+import sys
 
 def top_colors_in_box(img, x, y, radius, top_n=6):
     width, height = img.size
@@ -21,20 +23,20 @@ def top_colors_in_box(img, x, y, radius, top_n=6):
 def color_distance(c1, c2):
     return np.sum(np.abs(np.array(c1) - np.array(c2)))
 
-def process_image(path, max_color_dist=100):
+def process_image(path, max_color_dist=80):
     img = Image.open(path)
     img = img.convert("RGB")
 
     width, height = img.size
 
     # get corners of the yellow board
-    yellow = (238, 223, 80)
+    yellow = (238, 223, 80) 
     # Loop through all pixels forward
     flag = False
-    for x in range(width):
-        for y in range(height):
+    for y in range(height):
+        for x in range(width):
             rgb = img.getpixel((x, y))
-            if color_distance(rgb, yellow) < max_color_dist:
+            if color_distance(rgb, yellow) < 100 and rgb[0] - rgb[1] < 25:
                 upper_left = (x, y)
                 flag = True 
                 break
@@ -42,16 +44,16 @@ def process_image(path, max_color_dist=100):
             break
     # Loop through all pixels backward
     flag = False
-    for x in range(width)[::-1]:
-        for y in range(height)[::-1]:
+    for y in range(height)[::-1]:
+        for x in range(width)[::-1]:
             rgb = img.getpixel((x, y))
-            if color_distance(rgb, yellow) < max_color_dist:
+            if color_distance(rgb, yellow) < 100 and rgb[0] - rgb[1] < 25:
                 lower_right = (x, y)
                 flag = True 
                 break
         if flag:
             break
-    
+    print(upper_left, lower_right)
     # get middle of A18 and horizontal and vertical steps to next 
     left_len = (142 / 1015) * (lower_right[0] - upper_left[0])
     step_horizontal = (79 / 1015) * (lower_right[0] - upper_left[0])
@@ -84,14 +86,31 @@ def process_image(path, max_color_dist=100):
                 holds["middle"].append(f"{a}{n}")
             if green_p > 0.15:
                 holds["start"].append(f"{a}{n}")
-            # for color, p in top_n_colors:
-            #     if p > 0.15:
-            #         if color_distance(color, red) < max_color_dist:
-            #             holds["end"].append(f"{a}{n}")
-            #         if color_distance(color, blue) < max_color_dist:
-            #             holds["middle"].append(f"{a}{n}")
-            #         if color_distance(color, green) < max_color_dist:
-            #             holds["start"].append(f"{a}{n}")
-            #         if a == "E" and n == 18:
-            #             print(color, color_distance(color, red))
     return holds
+
+def process_images(images, f, t):
+    # put screenshots in folder screenshots for this to work
+    l = len(images)
+    holds = {}
+    for i in range(f, min(l, t)):
+        scr = images[i]
+        j = scr.rfind("_")
+        name = scr[:j]
+        scrpath = os.path.join("screenshots", scr)
+        h = process_image(scrpath)
+        holds[name] = h
+    with open(f"holds_{f}_{t-1}.json", "w", encoding="utf-8") as f:
+        json.dump(holds, f, indent=4, ensure_ascii=False)
+
+
+
+if __name__ == "__main__":
+    data = os.listdir("./screenshots")
+    screenshots = [x for x in data if x.endswith(".png")]
+    if len(sys.argv) < 2:
+        print("Usage: python screenshot_processer.py from to")
+        sys.exit()
+
+    f = int(sys.argv[1])
+    t = int(sys.argv[2])
+    process_images(screenshots, f, t)
