@@ -4,7 +4,11 @@ users_*.json
 problems.json
 users.json
 
+screenshots/*
 
+
+problem_names.json
+missing_list.json
 # Python.gitignore
 
 # Byte-compiled / optimized / DLL files
