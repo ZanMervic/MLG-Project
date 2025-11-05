@@ -1,7 +1,8 @@
 data/*
 
 screenshots/*
-
+Problems/*.json
+users/*
 
 problem_names.json
 missing_list.json
