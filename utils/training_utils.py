@@ -3,7 +3,7 @@ from torch_geometric.data import HeteroData, Data
 from torch.utils.data import DataLoader, Dataset
 import random
 
-def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val_p=0.1):
+def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val_p=0.1, by_user=True):
     """
     Split a HeteroData dataset into message passing, training supervision, validation and testing datasets.
 
@@ -14,6 +14,7 @@ def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val
         message_p: fraction of edges for message passing
         train_p: fraction of edges for training supervision
         val_p: fraction of edges for validation supervision
+        by_user: boolean, if True split each user by time, if False split the whole dataset by time
 
     Returns:
     tuple of four HeteroData objects:
@@ -22,13 +23,49 @@ def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val
         val_edges: edges used for validation supervision
         test_edges: edges used for testing
     """
-    # get the edge indexes of the relations and permute them 
+    # get the edge indexes of the relations
     edge_index = hetero_data[edge_type].edge_index
     rev_type = (edge_type[2], f"rev_{edge_type[1]}", edge_type[0])
     rev_edge_index = hetero_data[rev_type].edge_index
     num_edges = edge_index.size(1)
 
-    perm = torch.randperm(num_edges)
+    # sort edges by time
+    perm = torch.argsort(hetero_data[edge_type].edge_time)
+    edge_index_tmp = edge_index[:, perm]
+    if by_user:
+        # sort edges by user by time
+        edges = [[], [], [], []]
+        unique_src = torch.unique(edge_index_tmp[0])
+        idx = {s.item():[] for s in unique_src}
+        for i, s in enumerate(edge_index_tmp[0]):
+            idx[s.item()].append(i)
+        for s in unique_src:
+            mask = idx[s.item()]
+            l = len(mask)
+            for i, n in enumerate(mask):
+                if i < message_p * l:
+                    edges[0].append(n)
+                elif i < (message_p + train_p) * l:
+                    edges[1].append(n)
+                elif i < (message_p + train_p + val_p) * l:
+                    edges[2].append(n)
+                else:
+                    edges[3].append(n)
+
+        # compute breaks between splits
+        message_end = len(edges[0])
+        train_end = message_end + len(edges[1])
+        val_end = train_end + len(edges[2])
+
+        # modify permutation
+        p2 = torch.tensor([x for sublist in edges for x in sublist])
+        perm = perm[p2]
+    else:
+        # compute breaks between splits
+        message_end = int(message_p * num_edges)
+        train_end = int((message_p + train_p) * num_edges)
+        val_end = int((message_p + train_p + val_p) * num_edges)
+    
     edge_index = edge_index[:, perm]
     rev_edge_index = rev_edge_index[:, perm]
 
@@ -36,11 +73,7 @@ def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val
     edge_attrs = {k: v[perm] for k, v in hetero_data[edge_type].items() if k != 'edge_index'}
     rev_edge_attrs = {k: v[perm] for k, v in hetero_data[rev_type].items() if k != 'edge_index'}
 
-    # compute breaks between splits
-    message_end = int(message_p * num_edges)
-    train_end = int((message_p + train_p) * num_edges)
-    val_end = int((message_p + train_p + val_p) * num_edges)
-
+    # make splits
     datasets = []
     starts = [0, message_end, train_end, val_end]
     ends = [message_end, train_end, val_end, num_edges]
@@ -122,3 +155,62 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     return loader
+
+
+def train_hetero(model, message_data, train_data, edge_type, optimizer, device='cuda', num_epochs=10, batch_size=1024):
+    """
+    Train a heterogeneous GNN for link prediction using a custom edge loader.
+
+    Args:
+        model: Hetero GNN producing embeddings per node type
+        message_data: HeteroData object for message passing
+        train_data: HeteroData object for train supervision
+        loader: DataLoader yielding batches with 'pos_edge_index' and 'neg_edge_index'
+        edge_type: 3-tuple ('src_type', 'relation', 'dst_type')
+        optimizer: torch optimizer
+        device: 'cuda' or 'cpu'
+        num_epochs: number of training epochs
+    """
+    model = model.to(device)
+    model.train()
+
+    x_dict = {node_type: message_data[node_type].x for node_type in message_data.node_types}
+    edge_index_dict = {edge_type: message_data[edge_type].edge_index for edge_type in message_data.edge_types}
+
+    for epoch in range(num_epochs):
+        total_loss = 0
+
+        loader = create_edge_loader(message_data, train_data, edge_type, batch_size=batch_size)
+
+        for batch in loader:
+            pos_edge_index = batch['pos_edge_index'].to(device)  # [2, batch_size]
+            neg_edge_index = batch['neg_edge_index'].to(device)  # [2, batch_size]
+
+            # how many times more negative than positive samples we have
+            k = neg_edge_index.shape[1] // pos_edge_index.shape[1]
+
+            optimizer.zero_grad()
+
+            # Forward pass /// maybe need to change this depending on what kind of models we build
+            z_dict = model(x_dict, edge_index_dict)
+
+            # Positive edge scores (dot product)
+            src_pos = z_dict[edge_type[0]][pos_edge_index[0]]
+            dst_pos = z_dict[edge_type[2]][pos_edge_index[1]]
+            pos_scores = (src_pos * dst_pos).sum(dim=-1)
+
+            # Negative edge scores (dot product)
+            src_neg = z_dict[edge_type[0]][neg_edge_index[0]]
+            dst_neg = z_dict[edge_type[2]][neg_edge_index[1]]
+            neg_scores = (src_neg * dst_neg).sum(dim=-1)
+
+            # BPR loss 
+            loss = -torch.log(torch.sigmoid(pos_scores.repeat(k) - neg_scores)).mean()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * batch_size * k
+            total_edges += batch_size * k
+
+        avg_loss = total_loss / total_edges
+        print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
