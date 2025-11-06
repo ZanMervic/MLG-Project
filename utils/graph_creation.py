@@ -103,6 +103,19 @@ def grade_encoder(g, grade_to_idx):
     return grade_to_idx[g]
 
 
+def get_foot_rules_mappings(problems: dict):
+    foot_rules = set()
+    for problem in problems.values():
+        foot_rules.add(problem['holds'])
+    foot_rules_to_idx = {fr: i for i, fr in enumerate(foot_rules)}
+    return foot_rules_to_idx
+
+def foot_rules_encoder(fr, foot_rules_to_idx):
+    enc = [0.0] * len(foot_rules_to_idx)
+    enc[foot_rules_to_idx[fr]] = 1.0
+    return enc
+
+
 def users_feature_matrix(users: dict, user_ids: list, grade_to_idx: dict):
     user_features = []
 
@@ -139,10 +152,10 @@ def problems_feature_matrix(problems: dict, problem_ids: list, grade_to_idx: dic
         num_sends = (
             float(problem["num_sends"]) if problem["num_sends"] is not None else 0.0
         )
+        foot_rules = foot_rules_encoder(problem['holds'], get_foot_rules_mappings(problems))
         # setter =
-        # holds =
 
-        problem_features.append([grade_idx, rating, num_sends])
+        problem_features.append([grade_idx, rating, num_sends, *foot_rules])
 
     problem_x = torch.tensor(problem_features, dtype=torch.float)
     return problem_x
@@ -221,16 +234,16 @@ def problem_hold_edge_creation(
 
     for hold, problems in holds.items():
         h_idx = hold_id_to_idx[hold]
-        for type in ("start", "middle", "end"):
-            for problem in problems[type]:
+        for hold_type in ("start", "middle", "end"):
+            for problem in problems[hold_type]:
                 p_idx = problem_id_to_idx[problem]
 
                 hp_hold_indices.append(h_idx)
                 hp_problem_indices.append(p_idx)
 
-                hp_is_start.append(int(type == "start"))
-                hp_is_middle.append(int(type == "middle"))
-                hp_is_end.append(int(type == "end"))
+                hp_is_start.append(int(hold_type == "start"))
+                hp_is_middle.append(int(hold_type == "middle"))
+                hp_is_end.append(int(hold_type == "end"))
 
     hp_edge_index = torch.tensor(
         [hp_hold_indices, hp_problem_indices], dtype=torch.long
@@ -292,18 +305,18 @@ def create_hetero_graph():
     hetero_data["user", "rates", "problem"].edge_time = up_edge_time  # [num_edges,]
 
     # Add reverse edges (apparently good for GNN message passing):
-    hetero_data["problem", "rated_by", "user"].edge_index = up_edge_index.flip(0)
-    hetero_data["problem", "rated_by", "user"].edge_attr = (
+    hetero_data["problem", "rev_rates", "user"].edge_index = up_edge_index.flip(0)
+    hetero_data["problem", "rev_rates", "user"].edge_attr = (
         up_edge_attr  # usually same attrs
     )
-    hetero_data["problem", "rated_by", "user"].edge_time = up_edge_time
+    hetero_data["problem", "rev_rates", "user"].edge_time = up_edge_time
 
     # Add edges between problems and holds
     hetero_data["problem", "contains", "hold"].edge_index = hp_edge_index
     hetero_data["problem", "contains", "hold"].edge_attr = hp_edge_attr
 
     # Add reverse edges
-    hetero_data["hold", "contained_in", "problem"].edge_index = hp_edge_index.flip(0)
-    hetero_data["hold", "contained_in", "problem"].edge_attr = hp_edge_attr
+    hetero_data["hold", "rev_contains", "problem"].edge_index = hp_edge_index.flip(0)
+    hetero_data["hold", "rev_contains", "problem"].edge_attr = hp_edge_attr
 
     return hetero_data
