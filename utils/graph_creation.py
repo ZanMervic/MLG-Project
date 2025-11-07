@@ -14,13 +14,13 @@ def _data_loader(
     """
     Load users, problems, and problem holds data from JSON files.
     """
-    with open(users_file, "r") as f:
+    with open(users_file, "r", encoding="utf-8") as f:
         users = json.load(f)
 
-    with open(problems_file, "r") as f:
+    with open(problems_file, "r", encoding="utf-8") as f:
         problems = json.load(f)
 
-    with open(holds_file, "r") as f:
+    with open(holds_file, "r", encoding="utf-8") as f:
         problem_holds = json.load(f)
 
     return users, problems, problem_holds

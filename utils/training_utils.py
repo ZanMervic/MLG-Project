@@ -2,6 +2,20 @@ import torch
 from torch_geometric.data import HeteroData, Data
 from torch.utils.data import DataLoader, Dataset
 import random
+from torch_geometric.utils import to_networkx
+import networkx as nx
+
+def hetero_to_undirected_nx(hetero_data):
+    """Convert hetero graph to undirected NetworkX graph."""
+    G = nx.Graph()
+    for etype in hetero_data.edge_types:
+        src_type, rel, dst_type = etype
+        edge_index = hetero_data[etype].edge_index
+        for src, dst in edge_index.t().tolist():
+            G.add_edge((src_type, src), (dst_type, dst))
+            G.add_edge((dst_type, dst), (src_type, src))  # manually add reverse
+    return G
+
 
 def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val_p=0.1, by_user=True):
     """
@@ -129,6 +143,13 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
     edge_index = torch.cat([message_data[edge_type].edge_index, supervision_data[edge_type].edge_index], dim=1).tolist()
     existing_edges = {(u, p) for u, p in zip(edge_index[0], edge_index[1])}
     num_problems = message_data[edge_type[2]].x.shape[0]
+    
+    
+    # Build a graph from message data
+    G = hetero_to_undirected_nx(message_data)
+
+
+    pr_cache = {}
 
     def sample_easy_negative(pos_batch):
         """
@@ -141,12 +162,71 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
                 new_p = random.randint(0, num_problems-1)
             neg_edges.append([u.item(), new_p])
         return torch.tensor(neg_edges, dtype=torch.long).t()  # shape [2, num_neg]
+    
+    
+    def sample_hard_negative(pos_batch, skip_top=50, window_size=450):
+        """
+        PageRank-based hard negatives:
+        - For each user u in pos_batch, compute personalized PageRank (or reuse cache).
+        - Take problems ranked after the very top (skip_top) and sample from the next window.
+        - If no candidate found, fall back to easy negative.
+        """
+        neg_edges = []
+
+        for u, _ in pos_batch.t():
+            u_idx = u.item()
+
+            # Compute or reuse personalized PageRank vector for this user
+            if u_idx in pr_cache:
+                pr = pr_cache[u_idx]
+            else:
+                # personalization key must match node names in the NetworkX graph:
+                # Hetero nodes created by to_networkx are tuples like ('user', idx), ('problem', idx)
+                start_node = ('user', u_idx)
+                # If the node doesn't exist in G, fallback to empty dict
+                if start_node not in G:
+                    pr = {}
+                else:
+                    pr = nx.pagerank(G, alpha=0.85, personalization={start_node: 1.0})
+                pr_cache[u_idx] = pr
+
+            # collect problem nodes and sort by pagerank score desc
+            if not pr:
+                # fallback
+                neg_edges.append([u_idx, random.randint(0, num_problems - 1)])
+                continue
+
+            problem_scores = [(node, score) for node, score in pr.items()
+                              if isinstance(node, tuple) and node[0] == edge_type[2]]
+            problem_scores.sort(key=lambda x: x[1], reverse=True)
+
+            # choose candidates from a middle window to avoid the very top-most nodes
+            start = skip_top
+            end = min(skip_top + window_size, len(problem_scores))
+            candidates = [node for node, _ in problem_scores[start:end]
+                          if (u_idx, node[1]) not in existing_edges]
+
+            if len(candidates) == 0:
+                # fallback to easier negatives if no hard candidate found
+                new_p = random.randint(0, num_problems - 1)
+                while (u_idx, new_p) in existing_edges:
+                    new_p = random.randint(0, num_problems - 1)
+                neg_edges.append([u_idx, new_p])
+            else:
+                chosen = random.choice(candidates)
+                neg_edges.append([u_idx, chosen[1]])  # chosen is ('problem', problem_idx)
+
+        return torch.tensor(neg_edges, dtype=torch.long).t()  # [2, B]
+
 
     def collate_fn(batch):
         pos_batch = torch.stack(batch, dim=1)  # [2, batch_size]
-
-        neg_batch = sample_easy_negative(pos_batch)
-        # TODO: add hard negative sampling
+        # Try to sample hard negatives, if it fails, sample easy negatives
+        try: 
+            hard_neg = sample_hard_negative(pos_batch)
+            neg_batch = hard_neg
+        except Exception:
+            neg_batch = sample_easy_negative(pos_batch)
 
         return {
             'pos_edge_index': pos_batch,
