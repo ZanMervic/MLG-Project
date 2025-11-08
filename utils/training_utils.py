@@ -1,10 +1,15 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch_geometric.data import HeteroData, Data
 from torch.utils.data import DataLoader, Dataset
 import random
 from torch_geometric.utils import to_networkx
 import networkx as nx
 from collections import Counter
+from torch_geometric.nn import HeteroConv, SAGEConv
+
+
 
 def hetero_to_undirected_nx(data):
     """Convert a HeteroData or Data graph to undirected NetworkX graph."""
