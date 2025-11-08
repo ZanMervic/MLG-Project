@@ -282,8 +282,46 @@ def create_edge_loader(message_data, supervision_data, edge_type=None, batch_siz
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     return loader
 
+def recall_at_k(z_dict, edge_index_val, edge_type, k=20):
+    """
+    Compute Recall@K for user–item validation edges using precomputed embeddings.
 
-def train_hetero(model, message_data, train_data, edge_type, optimizer, device='cpu', num_epochs=10, batch_size=1024):
+    Args:
+        z_dict (dict): Dictionary of node embeddings from model.forward().
+        edge_index_val (torch.Tensor): [2, num_val_edges] tensor of validation edges 
+            (user->item relation).
+        user_type (str): Node type for users.
+        item_type (str): Node type for items.
+        k (int): Cutoff for Recall@K.
+
+    Returns:
+        float: Mean Recall@K across all users with at least one validation edge.
+    """
+    user_emb = z_dict[edge_type[0]]   # shape [num_users, d]
+    problem_emb = z_dict[edge_type[2]]   # shape [num_problems, d]
+
+    users, problems = edge_index_val
+
+    # Group validation positives by user
+    val_dict = {}
+    for u, i in zip(users.tolist(), problems.tolist()):
+        val_dict.setdefault(u, []).append(i)
+
+    recalls = []
+    for u, pos_items in val_dict.items():
+        # Compute scores for all items
+        scores = (user_emb[u] @ problem_emb.t())  # shape [num_problems]
+        topk = torch.topk(scores, k=k).indices.tolist()
+
+        # Compute recall@k for this user
+        hit_count = len(set(pos_items) & set(topk))
+        recall = hit_count / len(pos_items)
+        recalls.append(recall)
+
+    return sum(recalls) / len(recalls)
+
+
+def train_hetero(model, message_data, train_data, val_data, edge_type, optimizer, device='cpu', num_epochs=10, batch_size=1024):
     """
     Train a heterogeneous GNN for link prediction using a custom edge loader.
 
@@ -302,6 +340,9 @@ def train_hetero(model, message_data, train_data, edge_type, optimizer, device='
 
     x_dict = {node_type: message_data[node_type].x for node_type in message_data.node_types}
     edge_index_dict = {edge_type: message_data[edge_type].edge_index for edge_type in message_data.edge_types}
+    val_edge_index_dict = {edge_type: torch.unique(torch.cat(
+        [message_data[edge_type].edge_index, train_data[edge_type].edge_index],
+        dim=1).t(), dim=0).t() for edge_type in message_data.edge_types}
 
     for epoch in range(num_epochs):
         total_loss = 0
@@ -339,7 +380,14 @@ def train_hetero(model, message_data, train_data, edge_type, optimizer, device='
             total_edges += batch_size * k
 
         avg_loss = total_loss / total_edges
-        print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch+1}, average training loss: {avg_loss:.4f}")
+
+        with torch.no_grad():
+            pos_edge_index = val_data[edge_type].edge_index
+            # forward pass
+            z_dict = model(x_dict, val_edge_index_dict)
+
+            print(f"Validation Recall@20: {recall_at_k(z_dict, pos_edge_index, edge_type, k=20)}")
         
         
         
