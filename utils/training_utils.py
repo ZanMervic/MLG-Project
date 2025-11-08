@@ -4,22 +4,36 @@ from torch.utils.data import DataLoader, Dataset
 import random
 from torch_geometric.utils import to_networkx
 import networkx as nx
+from collections import Counter
 
-def hetero_to_undirected_nx(hetero_data):
-    """Convert hetero graph to undirected NetworkX graph."""
+def hetero_to_undirected_nx(data):
+    """Convert a HeteroData or Data graph to undirected NetworkX graph."""
+    if isinstance(data, HeteroData):
+        hetero = True
+    elif isinstance(data, Data):
+        hetero = False 
+    else:
+        raise TypeError("message_data should be of type HeteroData or Data")
     G = nx.Graph()
-    for etype in hetero_data.edge_types:
-        src_type, rel, dst_type = etype
-        edge_index = hetero_data[etype].edge_index
-        for src, dst in edge_index.t().tolist():
-            G.add_edge((src_type, src), (dst_type, dst))
-            G.add_edge((dst_type, dst), (src_type, src))  # manually add reverse
+    if hetero:
+        for etype in data.edge_types:
+            src_type, rel, dst_type = etype
+            edge_index = data[etype].edge_index
+            for src, dst in edge_index.t().tolist():
+                G.add_edge((src_type, src), (dst_type, dst))
+                G.add_edge((dst_type, dst), (src_type, src))  # manually add reverse
+    else:
+        for src, dst in data.edge_index.t().tolist():
+            # types don't matter, just set as user for easier hard neg sampling
+            G.add_edge(("user", src), ("user", dst))
+            G.add_edge(("user", dst), ("user", src))  # manually add reverse
     return G
 
 
 def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val_p=0.1, by_user=True):
     """
-    Split a HeteroData dataset into message passing, training supervision, validation and testing datasets.
+    Split a HeteroData dataset into message passing, training supervision, validation and testing HeteroData datasets 
+    over a given edge type.
 
     Args:
         hetero_data: HeteroData object to split
@@ -107,6 +121,15 @@ def train_val_test_split(hetero_data, edge_type, message_p=0.7, train_p=0.1, val
     
     return datasets
 
+def train_val_test_split_homogeneous(hetero_data, edge_type, message_p=0.7, train_p=0.1, val_p=0.1, by_user=True):
+    """
+    Split a HeteroData dataset into message passing, training supervision, validation and testing Data datasets 
+    over a given edge type.
+    This is used for LightGCN.
+    """
+    datasets = train_val_test_split(hetero_data, edge_type, message_p, train_p, val_p, by_user)
+    return [ds.to_homogeneous() for ds in datasets]
+
 class EdgeBatchDataset(Dataset):
     """Dataset of positive edges for batching."""
     def __init__(self, edge_index):
@@ -123,27 +146,41 @@ class EdgeBatchDataset(Dataset):
         return self.edge_index[:, idx]
 
 
-def create_edge_loader(message_data, supervision_data, edge_type, batch_size=1024):
+def create_edge_loader(message_data, supervision_data, edge_type=None, batch_size=1024):
     """
     Returns a DataLoader that yields batches of positive edges and their corresponding negative edges.
 
     Args:
-        message_data: HeteroData object of message edges
-        supervision_data: HeteroData object of supervision edges
-        edge_type: 3-tuple representing the type of edge to load, ex. ("user", "rates", "problem")
+        message_data: HeteroData / Data object of message edges
+        supervision_data: HeteroData / Data object of supervision edges
+        edge_type: 3-tuple representing the type of edge to load, ex. ("user", "rates", "problem"), or None if data is homogeneous
         batch_size: number of positive edges per batch
-        num_neg_per_pos: number of negative edges to generate per positive edge
 
     Returns:
         DataLoader yielding dicts with:
             'pos_edge_index': [2, batch_size]
             'neg_edge_index': [2, batch_size] (for now, need to add hard negatives)
     """
-    dataset = EdgeBatchDataset(supervision_data[edge_type].edge_index)
-    edge_index = torch.cat([message_data[edge_type].edge_index, supervision_data[edge_type].edge_index], dim=1).tolist()
-    existing_edges = {(u, p) for u, p in zip(edge_index[0], edge_index[1])}
-    num_problems = message_data[edge_type[2]].x.shape[0]
-    
+    if isinstance(message_data, HeteroData):
+        hetero = True
+    elif isinstance(message_data, Data):
+        hetero = False 
+    else:
+        raise TypeError("message_data should be of type HeteroData or Data")
+
+    if hetero:
+        dataset = EdgeBatchDataset(supervision_data[edge_type].edge_index)
+        edge_index = torch.cat([message_data[edge_type].edge_index, supervision_data[edge_type].edge_index], dim=1).tolist()
+        existing_edges = {(u, p) for u, p in zip(edge_index[0], edge_index[1])}
+        num_problems = message_data[edge_type[2]].x.shape[0]
+        num_users = 0
+    else:
+        # include only edges that start at users
+        dataset = EdgeBatchDataset(supervision_data.edge_index[:, message_data.node_type[supervision_data.edge_index[0]] == 0])
+        edge_index = torch.cat([message_data.edge_index, supervision_data.edge_index], dim=1).tolist()
+        existing_edges = {(u, p) for u, p in zip(edge_index[0], edge_index[1]) if message_data.node_type[u] == 0}
+        c = Counter(message_data.node_type.tolist())
+        num_users, num_problems = c[0], c[1]
     
     # Build a graph from message data
     G = hetero_to_undirected_nx(message_data)
@@ -157,9 +194,9 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
         """
         neg_edges = []
         for u, p in pos_batch.t():
-            new_p = random.randint(0, num_problems-1)
+            new_p = num_users + random.randint(0, num_problems-1)
             while (u.item(), new_p) in existing_edges:
-                new_p = random.randint(0, num_problems-1)
+                new_p = num_users + random.randint(0, num_problems-1)
             neg_edges.append([u.item(), new_p])
         return torch.tensor(neg_edges, dtype=torch.long).t()  # shape [2, num_neg]
     
@@ -193,11 +230,15 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
             # collect problem nodes and sort by pagerank score desc
             if not pr:
                 # fallback
-                neg_edges.append([u_idx, random.randint(0, num_problems - 1)])
+                neg_edges.append([u_idx, num_users + random.randint(0, num_problems - 1)])
                 continue
-
-            problem_scores = [(node, score) for node, score in pr.items()
-                              if isinstance(node, tuple) and node[0] == edge_type[2]]
+            
+            if hetero:
+                problem_scores = [(node, score) for node, score in pr.items()
+                                if isinstance(node, tuple) and node[0] == edge_type[2]]
+            else: 
+                problem_scores = [(node, score) for node, score in pr.items()
+                                if isinstance(node, tuple) and node[1] >= num_users]
             problem_scores.sort(key=lambda x: x[1], reverse=True)
 
             # choose candidates from a middle window to avoid the very top-most nodes
@@ -208,9 +249,9 @@ def create_edge_loader(message_data, supervision_data, edge_type, batch_size=102
 
             if len(candidates) == 0:
                 # fallback to easier negatives if no hard candidate found
-                new_p = random.randint(0, num_problems - 1)
+                new_p = num_users  + random.randint(0, num_problems - 1)
                 while (u_idx, new_p) in existing_edges:
-                    new_p = random.randint(0, num_problems - 1)
+                    new_p = num_users  + random.randint(0, num_problems - 1)
                 neg_edges.append([u_idx, new_p])
             else:
                 chosen = random.choice(candidates)

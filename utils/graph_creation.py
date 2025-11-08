@@ -3,13 +3,16 @@ import json
 import time
 import datetime
 import torch
+import os
+from pathlib import Path
 from torch_geometric.data import HeteroData
 
+file_dir = Path(__file__).parent
 
 def _data_loader(
-    users_file: str = "../data/all_users.json",
-    problems_file: str = "../data/all_problems.json",
-    holds_file: str = "../data/all_holds.json",
+    users_file: str = os.path.join(file_dir, "..", "data", "all_users.json"),
+    problems_file: str = os.path.join(file_dir, "..", "data", "all_problems.json"),
+    holds_file: str = os.path.join(file_dir, "..", "data", "all_holds.json"),
 ):
     """
     Load users, problems, and problem holds data from JSON files.
@@ -255,7 +258,7 @@ def problem_hold_edge_creation(
     return hp_edge_index, hp_edge_attr
 
 
-def create_hetero_graph():
+def create_hetero_graph(holds_as_nodes=True):
     # Load data
     users, problems, problem_holds = _data_loader()
 
@@ -295,7 +298,8 @@ def create_hetero_graph():
     # Add the nodes and their features
     hetero_data["user"].x = user_x  # [num_users, user_feat_dim]
     hetero_data["problem"].x = problem_x  # [num_problems, problem_feat_dim]
-    hetero_data["hold"].x = hold_x  # One-hot encoding for holds
+    if holds_as_nodes:
+        hetero_data["hold"].x = hold_x  # One-hot encoding for holds
 
     # Add edges between users and problems
     hetero_data["user", "rates", "problem"].edge_index = up_edge_index  # [2, num_edges]
@@ -311,12 +315,13 @@ def create_hetero_graph():
     )
     hetero_data["problem", "rev_rates", "user"].edge_time = up_edge_time
 
-    # Add edges between problems and holds
-    hetero_data["problem", "contains", "hold"].edge_index = hp_edge_index
-    hetero_data["problem", "contains", "hold"].edge_attr = hp_edge_attr
+    if holds_as_nodes:
+        # Add edges between problems and holds
+        hetero_data["problem", "contains", "hold"].edge_index = hp_edge_index
+        hetero_data["problem", "contains", "hold"].edge_attr = hp_edge_attr
 
-    # Add reverse edges
-    hetero_data["hold", "rev_contains", "problem"].edge_index = hp_edge_index.flip(0)
-    hetero_data["hold", "rev_contains", "problem"].edge_attr = hp_edge_attr
+        # Add reverse edges
+        hetero_data["hold", "rev_contains", "problem"].edge_index = hp_edge_index.flip(0)
+        hetero_data["hold", "rev_contains", "problem"].edge_attr = hp_edge_attr
 
     return hetero_data
