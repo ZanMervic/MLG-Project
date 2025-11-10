@@ -4,7 +4,7 @@ import networkx as nx
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.data import HeteroData, Data
-from torch_geometric.utils import get_ppr
+from .ppr_utils import ppr_to_hard_negatives, approximate_ppr_pyg, approximate_ppr_rw
 
 
 def hetero_to_undirected_nx(data) -> nx.Graph:
@@ -153,124 +153,6 @@ def train_val_test_split_homogeneous(
     return [ds.to_homogeneous() for ds in datasets]
 
 
-def approximate_ppr_pyg(
-    message_data,
-    supervision_data,
-    include_holds=True,
-    eps=1e-5,
-    alpha=0.1,
-):
-    """
-    Approximate personalized pagerank scores with pyG for all user nodes of a graph and include only
-    non-existing user-problem edges.
-
-    Args:
-        message_data: HeteroData / Data object of message edges
-        supervision_data: HeteroData / Data object of supervision edges
-        include_holds: boolean, whether to include hold nodes in the computation graph, only relevant with HeteroData
-
-    Returns:
-        edge_index, ppr_values; a sparse representation of PPR scores
-    """
-    if isinstance(message_data, HeteroData):
-        hetero = True
-    elif isinstance(message_data, Data):
-        hetero = False
-    else:
-        raise TypeError("message_data should be of type HeteroData or Data")
-
-    if hetero:
-        num_users = message_data["user"].x.shape[0]
-        num_problems = message_data["problem"].x.shape[0]
-        # transform edge indexes into a single homogeneous graph
-        user_problem = message_data[("user", "rates", "problem")].edge_index
-        user_problem[1] += num_users
-        existing_edges = torch.cat([user_problem, user_problem.flip(0)], dim=1)
-        N = num_problems + num_users
-        if include_holds:
-            hold_problem = message_data[("problem", "contains", "hold")].edge_index
-            hold_problem[1] += num_problems + num_users
-            existing_edges = torch.cat(
-                [existing_edges, hold_problem, hold_problem.flip(0)], dim=1
-            )
-            N += message_data["hold"].x.shape[0]
-        # compute ppr
-        ppr_edge_index, ppr_values = get_ppr(
-            existing_edges,
-            target=torch.tensor(range(num_users)),
-            alpha=alpha,
-            eps=eps,
-            num_nodes=N,
-        )
-        # update edges to include supervision
-        user_problem = supervision_data[("user", "rates", "problem")].edge_index
-        user_problem[1] += num_users
-        existing_edges = torch.cat(
-            [existing_edges, user_problem, user_problem.flip(0)], dim=1
-        )
-    else:
-        c = Counter(message_data.node_type.tolist())
-        num_users, num_problems = c[0], c[1]
-        existing_edges = message_data.edge_index
-        N = num_problems + num_users
-        # compute ppr
-        ppr_edge_index, ppr_values = get_ppr(
-            existing_edges,
-            target=torch.tensor(range(num_users)),
-            alpha=alpha,
-            eps=eps,
-            num_nodes=N,
-        )
-        # update edges to include supervision
-        existing_edges = torch.cat(
-            [message_data.edge_index, supervision_data.edge_index], dim=1
-        )
-
-    # filter ppr scores to exclude existing edges and scores user-user, user-hold
-    existing_edges = {(x, y) for x, y in existing_edges.t().tolist()}
-    new_index = []
-    new_scores = []
-    for (src, dst), score in zip(ppr_edge_index.t().tolist(), ppr_values.tolist()):
-        if (
-            num_users <= dst < num_users + num_problems
-            and (src, dst) not in existing_edges
-        ):
-            new_index.append((src, dst))
-            new_scores.append(score)
-
-    ppr_edge_index, ppr_values = torch.tensor(new_index).t(), torch.tensor(new_scores)
-    if hetero:
-        ppr_edge_index[1] -= num_users
-    return ppr_edge_index, ppr_values
-
-
-def ppr_to_hard_negatives(
-    ppr_edge_index: torch.Tensor, ppr_values: torch.Tensor, start=10, end=100
-):
-    """
-    Returns a dict of user - hard negative candidate list pairs, calculated with PPR.
-    """
-    # get all candidates for each user
-    negative_candidates = {}
-    for (src, dst), score in zip(ppr_edge_index.t().tolist(), ppr_values.tolist()):
-        if src in negative_candidates:
-            negative_candidates[src].append((dst, score))
-        else:
-            negative_candidates[src] = [(dst, score)]
-    # sort by ppr score
-    negative_candidates = {
-        k: [dst for dst, _ in sorted(v, key=lambda x: x[1], reverse=True)]
-        for k, v in negative_candidates.items()
-    }
-    # subset negatives
-    negative_candidates = {
-        k: v[start : min(end, len(v))]
-        for k, v in negative_candidates.items()
-        if len(v) > start
-    }
-    return negative_candidates
-
-
 class EdgeBatchDataset(Dataset):
     """Dataset of positive edges for batching."""
 
@@ -320,7 +202,7 @@ def create_edge_loader(
         raise TypeError("message_data should be of type HeteroData or Data")
 
     if hard_negatives is None:
-        ppr_edge_index, ppr_values = approximate_ppr_pyg(
+        ppr_edge_index, ppr_values = approximate_ppr_rw(
             message_data, supervision_data, include_holds=hetero
         )
         hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values)
