@@ -289,30 +289,38 @@ def create_edge_loader(
     return loader
 
 
-def recall_at_k(z_dict, edge_index_val, edge_type, k=20):
+def recall_at_k(embed, edge_index_val, edge_type, k=20, hetero=True, num_users=None):
     """
     Compute Recall@K for user–item validation edges using precomputed embeddings.
 
     Args:
-        z_dict (dict): Dictionary of node embeddings from model.forward().
+        embed (dict): Dictionary of node embeddings from model.forward().
         edge_index_val (torch.Tensor): [2, num_val_edges] tensor of validation edges
             (user->item relation).
         user_type (str): Node type for users.
         item_type (str): Node type for items.
         k (int): Cutoff for Recall@K.
+        hetero: True if the model is heterogeneous, False if homogeneous
 
     Returns:
         float: Mean Recall@K across all users with at least one validation edge.
     """
-    user_emb = z_dict[edge_type[0]]  # shape [num_users, d]
-    problem_emb = z_dict[edge_type[2]]  # shape [num_problems, d]
+    if hetero:
+        user_emb = embed[edge_type[0]]  # shape [num_users, d]
+        problem_emb = embed[edge_type[2]]  # shape [num_problems, d]
+    else:
+        user_emb = embed[:num_users]
+        problem_emb = embed[num_users:]
 
     users, problems = edge_index_val
+
+    if not hetero:
+        problems -= num_users
 
     # Group validation positives by user
     val_dict = {}
     for u, i in zip(users.tolist(), problems.tolist()):
-        val_dict.setdefault(u, []).append(i)
+        val_dict.setdefault(u, []).append(i if hetero else i - num_users)
 
     recalls = []
     for u, pos_items in val_dict.items():
@@ -328,13 +336,15 @@ def recall_at_k(z_dict, edge_index_val, edge_type, k=20):
     return sum(recalls) / len(recalls)
 
 
-def train_hetero(
+def train(
     model,
     message_data,
     train_data,
     val_data,
     edge_type,
     optimizer,
+    hetero=True,
+    features=True,
     device="cpu",
     num_epochs=10,
     batch_size=1024,
@@ -349,35 +359,52 @@ def train_hetero(
         loader: DataLoader yielding batches with 'pos_edge_index' and 'neg_edge_index'
         edge_type: 3-tuple ('src_type', 'relation', 'dst_type')
         optimizer: torch optimizer
+        hetero: True if the model is heterogeneous, False if homogeneous
+        features: True to include features, False to not (LightGCN)
         device: 'cuda' or 'cpu'
         num_epochs: number of training epochs
     """
     model = model.to(device)
     model.train()
 
-    x_dict = {
-        node_type: message_data[node_type].x for node_type in message_data.node_types
-    }
-    edge_index_dict = {
-        edge_type: message_data[edge_type].edge_index
-        for edge_type in message_data.edge_types
-    }
-    val_edge_index_dict = {
-        edge_type: torch.unique(
-            torch.cat(
-                [message_data[edge_type].edge_index, train_data[edge_type].edge_index],
-                dim=1,
-            ).t(),
-            dim=0,
-        ).t()
-        for edge_type in message_data.edge_types
-    }
+    if hetero:
+        x = {
+            node_type: message_data[node_type].x for node_type in message_data.node_types
+        }
+        edge_index = {
+            edge_type: message_data[edge_type].edge_index
+            for edge_type in message_data.edge_types
+        }
+        val_edge_index = {
+            edge_type: torch.unique(
+                torch.cat(
+                    [message_data[edge_type].edge_index, train_data[edge_type].edge_index],
+                    dim=1,
+                ).t(),
+                dim=0,
+            ).t()
+            for edge_type in message_data.edge_types
+        }
+    else:
+        x = torch.clone(message_data.x)
+        edge_index = torch.clone(message_data.edge_index)
+        val_edge_index = torch.cat([message_data.edge_index, train_data.edge_index], dim=1)
 
+    # precompute hard negative candidates
+    print("Computing hard negative candidates")
+    ppr_edge_index, ppr_values = approximate_ppr_rw(
+            message_data, train_data, include_holds=hetero
+        )
+    hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values)
+
+    # training loop
+    print("Starting training...")
     for epoch in range(num_epochs):
         total_loss = 0
+        total_edges = 0
 
         loader = create_edge_loader(
-            message_data, train_data, edge_type, batch_size=batch_size
+            message_data, train_data, edge_type, batch_size=batch_size, hard_negatives=hard_negatives
         )
 
         for batch in loader:
@@ -389,17 +416,26 @@ def train_hetero(
 
             optimizer.zero_grad()
 
-            # Forward pass /// maybe need to change this depending on what kind of models we build
-            z_dict = model(x_dict, edge_index_dict)
+            # Forward pass 
+            if features:
+                embed = model(x, edge_index)
+            else:
+                embed = model(edge_index)
 
+            if hetero:
+                src_embed = embed[edge_type[0]]
+                dst_embed = embed[edge_type[2]]
+            else:
+                src_embed = embed
+                dst_embed = embed
             # Positive edge scores (dot product)
-            src_pos = z_dict[edge_type[0]][pos_edge_index[0]]
-            dst_pos = z_dict[edge_type[2]][pos_edge_index[1]]
+            src_pos = src_embed[pos_edge_index[0]]
+            dst_pos = dst_embed[pos_edge_index[1]]
             pos_scores = (src_pos * dst_pos).sum(dim=-1)
 
             # Negative edge scores (dot product)
-            src_neg = z_dict[edge_type[0]][neg_edge_index[0]]
-            dst_neg = z_dict[edge_type[2]][neg_edge_index[1]]
+            src_neg = src_embed[neg_edge_index[0]]
+            dst_neg = dst_embed[neg_edge_index[1]]
             neg_scores = (src_neg * dst_neg).sum(dim=-1)
 
             # BPR loss
@@ -414,10 +450,16 @@ def train_hetero(
         print(f"Epoch {epoch+1}, average training loss: {avg_loss:.4f}")
 
         with torch.no_grad():
-            pos_edge_index = val_data[edge_type].edge_index
             # forward pass
-            z_dict = model(x_dict, val_edge_index_dict)
-
-            print(
-                f"Validation Recall@20: {recall_at_k(z_dict, pos_edge_index, edge_type, k=20)}"
-            )
+            embed = model(x, val_edge_index)
+            if hetero:
+                pos_edge_index = val_data[edge_type].edge_index
+                print(
+                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20)}"
+                )
+            else:
+                pos_edge_index = val_data.edge_index
+                num_users = message_data.node_type.tolist().count(0)
+                print(
+                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20, hetero=False, num_users=num_users)}"
+                )
