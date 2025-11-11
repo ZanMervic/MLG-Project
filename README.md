@@ -1,84 +1,193 @@
-# MoonBoard Recommendation System 
+# 🧗‍♂️ MoonBoard Recommendation System
 
-End-to-end tooling to scrape MoonBoard climber activity, convert the raw data into graph-structured datasets, and train graph recommendation models.
+End-to-end tooling to scrape MoonBoard data, convert it into graph datasets, and train heterogeneous GNN-based recommendation models such as **PinSAGE** and **GFormer**.
 
-## Repository Map
+---
 
-- `data/` – merged JSON dumps used as the default input to graph-building utilities (`all_users.json`, `all_problems.json`, `all_holds.json`).
-- `Problems/` & `Users/` – paginated raw JSON exports straight from the scraper; kept for auditing or rebuilding the merged files.
-- `utils/` – Python utilities and notebooks:
-  - `moonboard_scraper.py` automates Selenium scraping of MoonBoard user pages, capturing profile metadata and logbook entries.
-  - `merge_scraped_jsons.py` consolidates paginated `Problems/` and `Users/` files into the single datasets used downstream.
-  - `graph_creation.py` cleans the merged JSON and converts it into a `torch_geometric.data.HeteroData` object, adding reverse relations and optional hold nodes.
-  - `training_utils.py` contains shared helpers: dataset splits, edge loaders with hard-negative sampling, the `PinSAGEModel`, and training loops.
-  - `testing_utils.py` evaluation helpers (e.g., recall@k).
-  -  `graph_creation.ipynb` and `testing.ipynb`, capture experiments and interactive exploration.
-- `screenshots/` – reference captures for the scraping UI.
-- `requirements.txt` – Selenium-focused dependencies (install PyTorch/PyG separately as noted below).
+## 📁 Repository Structure
 
-## Environment Setup
+```
+├── data/                     # Merged JSON datasets used for graph construction (not included in the repo)
+│   ├── all_users.json
+│   ├── all_problems.json
+│   ├── all_holds.json
+│   └── problem_names.json
+│
+├── data_utils/               # Data scraping and preprocessing scripts
+│   ├── moonboard_scraper.py      # Automates scraping of MoonBoard users and problems
+│   ├── merge_scraped_jsons.py    # Merges paginated JSON dumps into single dataset files
+│   ├── screenshot_taker.py       # Captures UI screenshots for scraped problems
+│   └── screenshot_processer.py   # Postprocesses screenshots (e.g. hold highlighting)
+│
+├── models/
+│   └── gformer/              # Transformer-based recommendation model
+│       ├── Model.py
+│       ├── Params.py
+│       └── note.txt
+│
+├── utils/                    # Core graph and training utilities
+│   ├── graph_creation.py         # Builds a HeteroData graph from merged JSONs
+│   ├── ppr_utils.py              # Personalized PageRank (PPR) & hard-negative sampling
+│   ├── training_utils.py         # Dataset splits, dataloaders, training, evaluation
+│   ├── pinsage.py                # Implementation of PinSAGE for heterogeneous graphs
+│   ├── gformer.py                # Wrapper to use GFormer on the MoonBoard graph
+│   └── __init__.py
+│
+├── other/
+│   ├── gformer.ipynb             # Experiments and training runs with GFormer
+│   └── testing.ipynb             # Testing and exploratory analysis
+│
+├── environment.yml           # Conda environment specification
+├── README.md
+└── .gitignore
+```
 
-1. **Python**: 3.10+ recommended.
-2. **Virtual environment**:
+---
+
+## ⚙️ Environment Setup (via Conda)
+
+1. **Create and activate the environment**
+
    ```bash
-   python -m venv .venv
-   .\.venv\Scripts\activate
+   conda env create -f environment.yml
+   conda activate moonboard
    ```
-3. **Python packages**:
+
+2. **Install optional GPU support**
+   If not already included in your environment file:
+
    ```bash
-   pip install -r requirements.txt
+   conda install pytorch pytorch-cuda=12.1 pyg -c pytorch -c nvidia -c pyg
    ```
 
-4. **Browser driver**: `moonboard_scraper.py` expects Chrome; ensure the matching ChromeDriver binary is available on `PATH`.
+---
 
-## Data Flow
+## 🧮 Data Flow
 
-1. **Scrape** (`utils/moonboard_scraper.py`):
-   ```bash
-   python utils/moonboard_scraper.py <email> <password> <first_page> <last_page>
-   ```
-   - Opens MoonBoard, iterates through paginated user lists, and writes `users_<start>_<page>.json` and `problems_<start>_<page>.json`.
-   - Pauses system sleep on Windows to keep long scraping sessions alive.
+Note: Steps 1 and 2 can be skipped if you have pre-scraped data available in the `data/` directory.
 
-2. **Merge** (`utils/merge_scraped_jsons.py`):
-   - Normalises the paginated exports into `data/all_users.json`, `data/all_problems.json`, and `data/all_holds.json`.
-   - Run whenever new pages are scraped.
+### 1. Scrape Raw Data
 
-3. **Graph build** (`utils/graph_creation.py`):
-   ```python
-   from utils.graph_creation import create_hetero_graph
-   hetero = create_hetero_graph(holds_as_nodes=True)
-   ```
-   - Cleans user/problem dictionaries, drops empty entries, encodes grades and foot rules, and constructs:
-     - `user` nodes with `[ranking, highest_grade_idx, height, weight, problems_sent]`.
-     - `problem` nodes with grade, rating, num_sends, and one-hot foot rules.
-     - Optional `hold` nodes (identity embedding) with `problem↔hold` relations.
-   - Adds reverse edges and stores timestamps (`edge_time`) for temporal splits.
+`scraper` uses Selenium to log into MoonBoard and download user/problem logs.
 
-4. **Dataset splits** (`utils/training_utils.py`):
-   - `train_val_test_split` partitions edges into message-passing, train, validation, and test subsets (per-user chronological by default).
-   - `train_val_test_split_homogeneous` converts to homogeneous graphs for models like LightGCN.
+```bash
+python data_utils/moonboard_scraper.py <email> <password> <start_page> <end_page>
+```
 
-5. **Training & evaluation**:
-   ```python
-   from utils.training_utils import PinSAGEModel, train_pinsage
-   model = PinSAGEModel(in_channels=hetero["user"].num_node_features)
-   train_pinsage(model, message_data, train_data, optimizer, device="cuda")
-   ```
-   - `create_edge_loader` yields batches with personalised PageRank-based hard negatives.
-   - `train_pinsage` applies BPR loss; `testing_utils.recall_at_k` provides simple ranking metrics.
-   - Notebooks (`testing.ipynb`, `graph_creation.ipynb`) demonstrate interactive workflows for experimentation and plotting.
+This produces paginated JSONs of user and problem data.
 
-## Current & Planned Models
+---
 
-- **PinSAGE (implemented)**: `training_utils.PinSAGEModel` uses `SAGEConv` pending direct `PinSAGEConv` integration.
-- **LightGCN (baseline, upcoming)**: Will reuse homogeneous data conversion and the edge loader. Expect a simplified forward pass with layer-wise message averaging.
-- **GFormer (planned)**: Targets hold-aware sequence modelling; will consume the same cleaned graph but likely require positional encodings or hold subsets.
+### 2. Merge JSONs
 
-## Workflow
+Combine all paginated exports into unified datasets:
 
-1. Scrape missing user pages and merge them.
-2. Run `create_hetero_graph()` to regenerate the training graph (check logs for dropped entities).
-3. Persist split datasets or regenerate on the fly with `train_val_test_split`.
-4. Train PinSAGE; log losses and save embeddings or state dicts.
-5. Evaluate with recall@k and compare upcoming LightGCN baseline results.
+```bash
+python data_utils/merge_scraped_jsons.py
+```
+
+This outputs:
+
+* `data/all_users.json`
+* `data/all_problems.json`
+* `data/all_holds.json`
+
+---
+
+### 3. Build the Graph
+
+Generate a heterogeneous PyTorch Geometric graph:
+
+```python
+from utils.graph_creation import create_hetero_graph
+hetero = create_hetero_graph(holds_as_nodes=True)
+```
+
+**Nodes**
+
+* `user`: `[ranking, highest_grade, height, weight, problems_sent]`
+* `problem`: `[grade, rating, num_sends, foot_rule_onehot]`
+* `hold` *(optional)*: identity embeddings
+
+**Edges**
+
+* `user → problem` (`rates`) with grade, rating, attempts, and timestamps
+* `problem → hold` (`contains`) if hold nodes are enabled
+* Reverse edges are automatically added for message passing
+
+---
+
+### 4. Split the Dataset
+
+Temporal (per-user) edge splits for message passing, training, validation, and testing:
+
+```python
+from utils.training_utils import train_val_test_split
+message_data, train_data, val_data, test_data = train_val_test_split(
+    hetero, ("user", "rates", "problem")
+)
+```
+
+---
+
+### 5. Train a Model
+
+#### Example **GFormer**
+
+Transformer-based model (Graph-Former hybrid):
+
+```python
+from utils.gformer import GFormerWrapper
+from utils.training_utils import train
+from torch import optim
+
+model = GFormerWrapper(message_data, ("user", "rates", "problem"), device="cuda")
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+train(model, message_data, train_data, val_data, ("user", "rates", "problem"), optimizer)
+```
+
+---
+
+## 🔍 Negative Sampling and Evaluation
+
+Hard-negative edges are generated automatically using **Personalized PageRank (PPR)** or **random walk approximations** (`ppr_utils.py`).
+
+Evaluation uses **Recall@K**:
+
+```python
+from utils.training_utils import recall_at_k
+recall = recall_at_k(embeddings, val_data[("user", "rates", "problem")].edge_index,
+                     ("user", "rates", "problem"), k=20)
+print("Recall@20:", recall)
+```
+
+---
+
+## 📓 Notebooks
+
+* **`other/gformer.ipynb`** – GFormer training and evaluation
+* **`other/testing.ipynb`** – Experimenting and PinSAGE testing
+
+---
+
+## 🧠 Models Overview
+
+| Model                  | Description                                                     | File                                            |
+| ---------------------- | --------------------------------------------------------------- | ----------------------------------------------- |
+| **PinSAGE**            | GraphSAGE-style message passing on bipartite user-problem graph | `utils/pinsage.py`                              |
+| **GFormer**            | Transformer-based model operating on normalized adjacency       | `utils/gformer.py`, `models/gformer/`           |
+| **(Planned)** LightGCN | Lightweight collaborative filtering baseline                    | `utils/training_utils.py` (homogeneous support) |
+
+---
+
+## 🪜 Recommended Workflow
+
+1. Scrape (or download the data if available and move to step 3.) missing user/problem data.
+2. Merge JSONs into `data/all_*.json`.
+3. Run `create_hetero_graph()` to regenerate the PyG dataset.
+4. Split edges with `train_val_test_split()`.
+5. Train `PinSAGEHetero` or `GFormerWrapper`.
+6. Evaluate with `recall_at_k`.
+7. Compare models and export embeddings.
+
