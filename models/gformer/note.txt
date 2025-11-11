@@ -1,0 +1,2 @@
+The code in the GFormer folder was copied from the GFormer github repository:
+https://github.com/HKUDS/GFormer
