@@ -404,7 +404,7 @@ def train(
         total_edges = 0
 
         loader = create_edge_loader(
-            message_data, train_data, edge_type, batch_size=batch_size, hard_negatives=hard_negatives
+            message_data, train_data, edge_type, batch_size=batch_size, hard_negatives=hard_negatives, n_hard=epoch
         )
 
         for batch in loader:
@@ -451,15 +451,21 @@ def train(
 
         with torch.no_grad():
             # forward pass
-            embed = model(x, val_edge_index)
+            if features:
+                embed = model(x, val_edge_index)
+            else:
+                embed = model.get_embedding(val_edge_index)
             if hetero:
                 pos_edge_index = val_data[edge_type].edge_index
                 print(
-                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20)}"
+                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20):.4f}"
                 )
             else:
-                pos_edge_index = val_data.edge_index
+                pos_edge_index = torch.clone(val_data.edge_index)
+                pos_edge_index = pos_edge_index[
+                    :, val_data.node_type[pos_edge_index[0]] == 0
+                ]
                 num_users = message_data.node_type.tolist().count(0)
                 print(
-                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20, hetero=False, num_users=num_users)}"
+                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20, hetero=False, num_users=num_users):.4f}"
                 )
