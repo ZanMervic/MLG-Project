@@ -454,7 +454,7 @@ def train(
             if features:
                 embed = model(x, val_edge_index)
             else:
-                embed = model.get_embedding(val_edge_index)
+                embed = model(val_edge_index)
             if hetero:
                 pos_edge_index = val_data[edge_type].edge_index
                 print(
