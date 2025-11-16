@@ -369,32 +369,40 @@ def train(
 
     if hetero:
         x = {
-            node_type: message_data[node_type].x for node_type in message_data.node_types
+            node_type: message_data[node_type].x.to(device)
+            for node_type in message_data.node_types
         }
         edge_index = {
-            edge_type: message_data[edge_type].edge_index
+            edge_type: message_data[edge_type].edge_index.to(device)
             for edge_type in message_data.edge_types
         }
         val_edge_index = {
             edge_type: torch.unique(
                 torch.cat(
-                    [message_data[edge_type].edge_index, train_data[edge_type].edge_index],
+                    [
+                        message_data[edge_type].edge_index,
+                        train_data[edge_type].edge_index,
+                    ],
                     dim=1,
                 ).t(),
                 dim=0,
-            ).t()
+            )
+            .t()
+            .to(device)
             for edge_type in message_data.edge_types
         }
     else:
-        x = torch.clone(message_data.x)
-        edge_index = torch.clone(message_data.edge_index)
-        val_edge_index = torch.cat([message_data.edge_index, train_data.edge_index], dim=1)
+        x = torch.clone(message_data.x).to(device)
+        edge_index = torch.clone(message_data.edge_index).to(device)
+        val_edge_index = torch.cat(
+            [message_data.edge_index, train_data.edge_index], dim=1
+        ).to(device)
 
     # precompute hard negative candidates
     print("Computing hard negative candidates")
     ppr_edge_index, ppr_values = approximate_ppr_rw(
-            message_data, train_data, include_holds=hetero
-        )
+        message_data, train_data, include_holds=hetero
+    )
     hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values)
 
     # training loop
@@ -404,7 +412,12 @@ def train(
         total_edges = 0
 
         loader = create_edge_loader(
-            message_data, train_data, edge_type, batch_size=batch_size, hard_negatives=hard_negatives, n_hard=epoch
+            message_data,
+            train_data,
+            edge_type,
+            batch_size=batch_size,
+            hard_negatives=hard_negatives,
+            n_hard=epoch,
         )
 
         for batch in loader:
@@ -416,7 +429,7 @@ def train(
 
             optimizer.zero_grad()
 
-            # Forward pass 
+            # Forward pass
             if features:
                 embed = model(x, edge_index)
             else:

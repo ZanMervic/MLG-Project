@@ -249,7 +249,7 @@ def problem_hold_edge_creation(
                 hp_is_end.append(int(hold_type == "end"))
 
     hp_edge_index = torch.tensor(
-        [hp_hold_indices, hp_problem_indices], dtype=torch.long
+        [hp_problem_indices, hp_hold_indices], dtype=torch.long
     )
     hp_edge_attr = torch.tensor(
         list(zip(hp_is_start, hp_is_middle, hp_is_end)), dtype=torch.float
