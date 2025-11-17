@@ -2,6 +2,7 @@ from collections import Counter
 import random
 import networkx as nx
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.data import HeteroData, Data
 from .ppr_utils import ppr_to_hard_negatives, approximate_ppr_pyg, approximate_ppr_rw
@@ -348,6 +349,7 @@ def train(
     device="cpu",
     num_epochs=10,
     batch_size=1024,
+    hn_increase_rate=1,
 ):
     """
     Train a heterogeneous GNN for link prediction using a custom edge loader.
@@ -363,6 +365,8 @@ def train(
         features: True to include features, False to not (LightGCN)
         device: 'cuda' or 'cpu'
         num_epochs: number of training epochs
+        batch_size: number of positive edges per batch
+        hn_increase_rate: int, how many epochs before increasing number of hard negatives by 1
     """
     model = model.to(device)
     model.train()
@@ -417,7 +421,7 @@ def train(
             edge_type,
             batch_size=batch_size,
             hard_negatives=hard_negatives,
-            n_hard=epoch,
+            n_hard=epoch // hn_increase_rate,
         )
 
         for batch in loader:
@@ -452,7 +456,9 @@ def train(
             neg_scores = (src_neg * dst_neg).sum(dim=-1)
 
             # BPR loss
-            loss = -torch.log(torch.sigmoid(pos_scores.repeat(k) - neg_scores)).mean()
+            # loss = -torch.log(torch.sigmoid(pos_scores.repeat(k) - neg_scores)).mean()
+            # Numerically stable BPR loss:
+            loss = F.softplus(-(pos_scores.repeat(k) - neg_scores)).mean()
             loss.backward()
             optimizer.step()
 

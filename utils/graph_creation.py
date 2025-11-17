@@ -9,6 +9,7 @@ from torch_geometric.data import HeteroData
 
 file_dir = Path(__file__).parent
 
+
 def _data_loader(
     users_file: str = os.path.join(file_dir, "..", "data", "all_users.json"),
     problems_file: str = os.path.join(file_dir, "..", "data", "all_problems.json"),
@@ -109,9 +110,10 @@ def grade_encoder(g, grade_to_idx):
 def get_foot_rules_mappings(problems: dict):
     foot_rules = set()
     for problem in problems.values():
-        foot_rules.add(problem['holds'])
+        foot_rules.add(problem["holds"])
     foot_rules_to_idx = {fr: i for i, fr in enumerate(foot_rules)}
     return foot_rules_to_idx
+
 
 def foot_rules_encoder(fr, foot_rules_to_idx):
     enc = [0.0] * len(foot_rules_to_idx)
@@ -155,7 +157,9 @@ def problems_feature_matrix(problems: dict, problem_ids: list, grade_to_idx: dic
         num_sends = (
             float(problem["num_sends"]) if problem["num_sends"] is not None else 0.0
         )
-        foot_rules = foot_rules_encoder(problem['holds'], get_foot_rules_mappings(problems))
+        foot_rules = foot_rules_encoder(
+            problem["holds"], get_foot_rules_mappings(problems)
+        )
         # setter =
 
         problem_features.append([grade_idx, rating, num_sends, *foot_rules])
@@ -258,7 +262,32 @@ def problem_hold_edge_creation(
     return hp_edge_index, hp_edge_attr
 
 
-def create_hetero_graph(holds_as_nodes=True):
+def standardize_columns(x: torch.Tensor, cols: list[int]):
+    """
+    x: [N, F] feature matrix
+    cols: indices of columns to standardize
+    Returns standardized x and (mean, std) for those columns.
+    """
+    if len(cols) == 0:
+        return x, None
+
+    x = x.clone()
+    cont = x[:, cols]
+    mean = cont.mean(dim=0, keepdim=True)
+    std = cont.std(dim=0, keepdim=True).clamp_min(1e-6)
+    x[:, cols] = (cont - mean) / std
+    return x, {"mean": mean, "std": std, "cols": cols}
+
+
+def create_hetero_graph(holds_as_nodes=True, standardize=True):
+    """
+    Create a heterogeneous graph using PyG's HeteroData structure.
+    holds_as_nodes: whether to include holds as nodes in the graph
+    standardize: whether to standardize numerical features
+    Returns:
+        hetero_data: HeteroData object representing the graph
+    """
+
     # Load data
     users, problems, problem_holds = _data_loader()
 
@@ -284,6 +313,16 @@ def create_hetero_graph(holds_as_nodes=True):
     user_x = users_feature_matrix(users, user_ids, grade_to_idx)
     problem_x = problems_feature_matrix(problems, problem_ids, grade_to_idx)
     hold_x = torch.eye(len(hold_ids))  # One-hot encoding for holds
+
+    # Feature standardization
+    if standardize:
+        # User feature layout: ranking, highest_grade_idx, height, weight, problems_sent
+        user_cont_cols = [0, 1, 2, 3, 4] # Normalize all columns
+        user_x, _ = standardize_columns(user_x, user_cont_cols)
+
+        # Problem feature layout: grade_idx, rating, num_sends, foot_rules (onehot)
+        problem_cont_cols = [0, 1, 2] # We skip the one hot encoded features
+        problem_x, _ = standardize_columns(problem_x, problem_cont_cols)
 
     # Create edges
     up_edge_index, up_edge_attr, up_edge_time = user_problem_edge_creation(
@@ -321,7 +360,9 @@ def create_hetero_graph(holds_as_nodes=True):
         hetero_data["problem", "contains", "hold"].edge_attr = hp_edge_attr
 
         # Add reverse edges
-        hetero_data["hold", "rev_contains", "problem"].edge_index = hp_edge_index.flip(0)
+        hetero_data["hold", "rev_contains", "problem"].edge_index = hp_edge_index.flip(
+            0
+        )
         hetero_data["hold", "rev_contains", "problem"].edge_attr = hp_edge_attr
 
     return hetero_data
