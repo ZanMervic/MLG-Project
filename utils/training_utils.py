@@ -350,6 +350,9 @@ def train(
     num_epochs=10,
     batch_size=1024,
     hn_increase_rate=1,
+    max_hn=None,
+    ppr_start=10,
+    ppr_end=100,
 ):
     """
     Train a heterogeneous GNN for link prediction using a custom edge loader.
@@ -367,6 +370,9 @@ def train(
         num_epochs: number of training epochs
         batch_size: number of positive edges per batch
         hn_increase_rate: int, how many epochs before increasing number of hard negatives by 1
+        max_hn: int, the maximum number of hard negatives, after which we don't increase anymore
+        ppr_start: int, start range for PPR-based hard negative sampling
+        ppr_end: int, end range for PPR-based hard negative sampling
     """
     model = model.to(device)
     model.train()
@@ -407,7 +413,7 @@ def train(
     ppr_edge_index, ppr_values = approximate_ppr_rw(
         message_data, train_data, include_holds=hetero
     )
-    hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values)
+    hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values, start=ppr_start, end=ppr_end)
 
     # training loop
     print("Starting training...")
@@ -421,7 +427,11 @@ def train(
             edge_type,
             batch_size=batch_size,
             hard_negatives=hard_negatives,
-            n_hard=epoch // hn_increase_rate,
+            n_hard=(
+                min(epoch // hn_increase_rate, max_hn)
+                if max_hn is not None
+                else epoch // hn_increase_rate
+            ),
         )
 
         for batch in loader:
