@@ -353,6 +353,8 @@ def train(
     max_hn=None,
     ppr_start=10,
     ppr_end=100,
+    early_stopping_patience=10,
+    early_stopping_min_delta=0.0,
 ):
     """
     Train a heterogeneous GNN for link prediction using a custom edge loader.
@@ -416,6 +418,11 @@ def train(
     hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values, start=ppr_start, end=ppr_end)
 
     # training loop
+    best_recall = -1.0
+    best_epoch = -1
+    epochs_no_improve = 0
+    best_state_dict = None
+
     print("Starting training...")
     for epoch in range(num_epochs):
         total_loss = 0
@@ -481,20 +488,54 @@ def train(
         with torch.no_grad():
             # forward pass
             if features:
-                embed = model(x, val_edge_index)
+                embed_val = model(x, val_edge_index)
             else:
-                embed = model(val_edge_index)
+                embed_val = model(val_edge_index)
             if hetero:
-                pos_edge_index = val_data[edge_type].edge_index
-                print(
-                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20):.4f}"
+                pos_edge_index_val = val_data[edge_type].edge_index.to(device)
+                val_recall = recall_at_k(
+                    embed_val, pos_edge_index_val, edge_type, k=20
                 )
             else:
-                pos_edge_index = torch.clone(val_data.edge_index)
-                pos_edge_index = pos_edge_index[
-                    :, val_data.node_type[pos_edge_index[0]] == 0
+                pos_edge_index_val = torch.clone(val_data.edge_index)
+                pos_edge_index_val = pos_edge_index_val[
+                    :, val_data.node_type[pos_edge_index_val[0]] == 0
                 ]
                 num_users = message_data.node_type.tolist().count(0)
-                print(
-                    f"Validation Recall@20: {recall_at_k(embed, pos_edge_index, edge_type, k=20, hetero=False, num_users=num_users):.4f}"
+                val_recall = recall_at_k(
+                    embed_val,
+                    pos_edge_index_val,
+                    edge_type,
+                    k=20,
+                    hetero=False,
+                    num_users=num_users,
                 )
+
+        print(f"Validation Recall@20: {val_recall:.4f}")
+
+        # ---- early stopping check ----
+        if val_recall > best_recall + early_stopping_min_delta:
+            best_recall = val_recall
+            best_epoch = epoch
+            epochs_no_improve = 0
+            # store best weights on CPU so we can reload later
+            best_state_dict = {
+                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+            }
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= early_stopping_patience:
+                print(
+                    f"Early stopping at epoch {epoch+1}. "
+                    f"Best Recall@20={best_recall:.4f} at epoch {best_epoch+1}."
+                )
+                break
+
+    # restore best weights
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+
+    return {
+        "best_recall": float(best_recall),
+        "best_epoch": best_epoch + 1 if best_epoch >= 0 else None,
+    }
