@@ -4,7 +4,7 @@ from torch_geometric.nn import HeteroConv, SAGEConv
 
 
 class Custom(nn.Module):
-    def __init__(self, hetero_data, hidden_channels=64, num_layers=2, dropout=0.1):
+    def __init__(self, hetero_data, hidden_channels=64, output_lin=False, num_layers=2, dropout=0.1):
         super().__init__()
 
         # This gives you ([node_types], [edge_type tuples...])
@@ -37,6 +37,12 @@ class Custom(nn.Module):
                 )
             self.convs.append(HeteroConv(conv_dict, aggr="sum"))
 
+        # 3) Final linear layers per node type (optional)
+        if output_lin:
+            self.lin_dict_out = nn.ModuleDict()
+            for node_type in node_types:
+                self.lin_dict_out[node_type] = nn.Linear(hidden_channels, hidden_channels)
+
     def forward(self, x_dict, edge_index_dict):
         # x_dict: {"user": user_x, "problem": problem_x, "hold": hold_x}
         # edge_index_dict: {("user","rates","problem"): edge_index, ...}
@@ -58,5 +64,11 @@ class Custom(nn.Module):
                 h = F.dropout(h, p=self.dropout, training=self.training)
                 h_dict[node_type] = h
 
-        # 3) Return final node embeddings per type
+        # 3) Final linear layer per node type (if defined)
+        if hasattr(self, 'lin_dict_out'):
+            for node_type in h_dict:
+                h = self.lin_dict_out[node_type](h_dict[node_type])
+                h_dict[node_type] = h
+
+        # 4) Return final node embeddings per type
         return h_dict
