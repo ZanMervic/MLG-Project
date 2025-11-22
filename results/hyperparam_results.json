@@ -1,0 +1,342 @@
+[
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 1,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 10,
+      "ppr_end": 100
+    },
+    "best_recall": 0.24153049149537303,
+    "best_epoch": 18,
+    "time_sec": 420.34936714172363
+  },
+  {
+    "config": {
+      "hidden_channels": 64,
+      "num_layers": 2,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.0005,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 5,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 200
+    },
+    "best_recall": 0.23330284724655467,
+    "best_epoch": 32,
+    "time_sec": 576.1731321811676
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 1,
+      "output_lin": false,
+      "dropout": 0.2,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 5,
+      "max_hn": 1,
+      "ppr_start": 10,
+      "ppr_end": 200
+    },
+    "best_recall": 0.1974157304214402,
+    "best_epoch": 2,
+    "time_sec": 186.34039950370789
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 1,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.2184862761380757,
+    "best_epoch": 6,
+    "time_sec": 238.30570077896118
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.21793546415033893,
+    "best_epoch": 35,
+    "time_sec": 579.8430626392365
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 1,
+      "output_lin": false,
+      "dropout": 0.0,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 5,
+      "max_hn": 2,
+      "ppr_start": 10,
+      "ppr_end": 100
+    },
+    "best_recall": 0.2489261497520405,
+    "best_epoch": 10,
+    "time_sec": 316.056866645813
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 2,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.01,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 5,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.2139706668498406,
+    "best_epoch": 11,
+    "time_sec": 294.1033675670624
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 200
+    },
+    "best_recall": 0.24435819033384729,
+    "best_epoch": 27,
+    "time_sec": 620.6982910633087
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.0005,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 5,
+      "max_hn": 2,
+      "ppr_start": 10,
+      "ppr_end": 100
+    },
+    "best_recall": 0.23290554616831402,
+    "best_epoch": 17,
+    "time_sec": 504.24250626564026
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.0,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.24090108797310264,
+    "best_epoch": 35,
+    "time_sec": 578.0511255264282
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.01,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 5,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.2228655684360542,
+    "best_epoch": 22,
+    "time_sec": 395.9583668708801
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.2,
+      "lr": 0.0005,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.22696510766046216,
+    "best_epoch": 34,
+    "time_sec": 717.1256589889526
+  },
+  {
+    "config": {
+      "hidden_channels": 32,
+      "num_layers": 2,
+      "output_lin": true,
+      "dropout": 0.1,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 20,
+      "ppr_end": 200
+    },
+    "best_recall": 0.24143870721374094,
+    "best_epoch": 28,
+    "time_sec": 510.86109161376953
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 1,
+      "output_lin": false,
+      "dropout": 0.0,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 5,
+      "max_hn": 2,
+      "ppr_start": 20,
+      "ppr_end": 200
+    },
+    "best_recall": 0.24844630529124442,
+    "best_epoch": 21,
+    "time_sec": 456.9088261127472
+  },
+  {
+    "config": {
+      "hidden_channels": 64,
+      "num_layers": 2,
+      "output_lin": true,
+      "dropout": 0.1,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 200
+    },
+    "best_recall": 0.25354543238761634,
+    "best_epoch": 29,
+    "time_sec": 542.3532662391663
+  },
+  {
+    "config": {
+      "hidden_channels": 64,
+      "num_layers": 2,
+      "output_lin": false,
+      "dropout": 0.1,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 10,
+      "ppr_end": 200
+    },
+    "best_recall": 0.23969859033373028,
+    "best_epoch": 33,
+    "time_sec": 579.8054821491241
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 2,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.001,
+      "weight_decay": 1e-05,
+      "hn_increase_rate": 3,
+      "max_hn": 1,
+      "ppr_start": 20,
+      "ppr_end": 100
+    },
+    "best_recall": 0.24071159233626307,
+    "best_epoch": 27,
+    "time_sec": 619.1712396144867
+  },
+  {
+    "config": {
+      "hidden_channels": 128,
+      "num_layers": 1,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 10,
+      "ppr_end": 200
+    },
+    "best_recall": 0.23296344236303976,
+    "best_epoch": 21,
+    "time_sec": 474.6478531360626
+  },
+  {
+    "config": {
+      "hidden_channels": 64,
+      "num_layers": 1,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.0005,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 10,
+      "ppr_end": 100
+    },
+    "best_recall": 0.19471120962375954,
+    "best_epoch": 1,
+    "time_sec": 199.20617628097534
+  },
+  {
+    "config": {
+      "hidden_channels": 64,
+      "num_layers": 1,
+      "output_lin": true,
+      "dropout": 0.2,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "hn_increase_rate": 3,
+      "max_hn": 2,
+      "ppr_start": 10,
+      "ppr_end": 100
+    },
+    "best_recall": 0.21992079938852752,
+    "best_epoch": 19,
+    "time_sec": 401.6590087413788
+  }
+]

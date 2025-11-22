@@ -1,0 +1,16 @@
+{
+  "best_config": {
+    "hidden_channels": 64,
+    "num_layers": 2,
+    "heads": 2,
+    "dropout": 0.1,
+    "lr": 0.001,
+    "weight_decay": 1e-05,
+    "hn_increase_rate": 3,
+    "max_hn": 2,
+    "ppr_start": 10,
+    "ppr_end": 200
+  },
+  "best_recall": 0.2578819836039393,
+  "trials_completed": 20
+}

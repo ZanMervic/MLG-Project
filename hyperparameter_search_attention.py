@@ -1,7 +1,8 @@
-import itertools
 import random
 import json
 import time
+import os
+import sys
 
 import torch
 
@@ -59,7 +60,7 @@ def main():
     # --- 2) Define hyperparameter search space ---
     # Keep this small at first; expand once everything runs on HPC.
     search_space = {
-        "hidden_channels": [32, 64, 128],
+        "hidden_channels": [16, 32, 64],
         "num_layers": [1, 2],
         "heads": [2, 4, 8],
         "dropout": [0.0, 0.1, 0.2],
@@ -73,6 +74,8 @@ def main():
 
     # How many random configs to try (you can bump this up on HPC)
     N_TRIALS = 20
+    RESULTS_PATH = "hyperparam_results_attention.json"
+    BEST_PATH = "hyperparam_best_attention.json"
 
     best_config = None
     best_recall = -1.0
@@ -83,6 +86,7 @@ def main():
         print("\n" + "=" * 80)
         print(f"Trial {trial_idx}/{N_TRIALS}")
         print("Config:", cfg)
+        sys.stdout.flush()
 
         # --- 3) Build model & optimizer for this config ---
         model = build_model(
@@ -145,6 +149,30 @@ def main():
             best_config = cfg
             print(f"*** New best config with Recall@20={best_recall:.4f} ***")
 
+        try:
+            with open(RESULTS_PATH, "w") as f:
+                json.dump(results, f, indent=2)
+
+            with open(BEST_PATH, "w") as f:
+                json.dump(
+                    {
+                        "best_config": best_config,
+                        "best_recall": best_recall,
+                        "trials_completed": trial_idx,
+                    },
+                    f,
+                    indent=2,
+                )
+        except Exception as e:
+            # Don't crash training just because writing logs failed
+            print(f"Warning: failed to write JSON results: {e}")
+            sys.stdout.flush()
+
+        del model
+        del optimizer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     print("\n" + "#" * 80)
     print("Hyperparameter search finished.")
     print("Best config:")
@@ -152,9 +180,9 @@ def main():
     print(f"Best validation Recall@20: {best_recall:.4f}")
 
     # Optionally dump all results to a JSON file (for later analysis)
-    with open("hyperparam_results.json", "w") as f:
+    with open("hyperparam_results_attention_final.json", "w") as f:
         json.dump(results, f, indent=2)
-
+    sys.stdout.flush()
 
 if __name__ == "__main__":
     main()
