@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.data import HeteroData, Data
 from .ppr_utils import ppr_to_hard_negatives, approximate_ppr_pyg, approximate_ppr_rw
+from .graph_creation import standardize_columns
 
 
 def hetero_to_undirected_nx(data) -> nx.Graph:
@@ -39,10 +40,11 @@ def train_val_test_split(
     train_p=0.1,
     val_p=0.1,
     by_user=True,
+    standardize=True
 ):
     """
     Split a HeteroData dataset into message passing, training supervision, validation and testing HeteroData datasets
-    over a given edge type.
+    over a given edge type. Input should not be standardized.
 
     Args:
         hetero_data: HeteroData object to split
@@ -116,6 +118,8 @@ def train_val_test_split(
 
     # make splits
     datasets = []
+    user_ratings = {}
+    problem_ratings = {}
     starts = [0, message_end, train_end, val_end]
     ends = [message_end, train_end, val_end, num_edges]
     for s, e in zip(starts, ends):
@@ -130,7 +134,62 @@ def train_val_test_split(
         for k, v in rev_edge_attrs.items():
             if k != "edge_index":
                 data[rev_type][k] = v[s:e]
+        
+        # update user features
+        rs = torch.clone(data[("user", "rates", "problem")].edge_index)
+        rs[1] = data["problem"].x.t()[0][rs[1]]
+
+        for u, r in rs.t().tolist():
+            user_ratings.setdefault(u, []).append(r)
+        max_grade = {k: (max(v) if max(v) > -1 else 0) for k, v in user_ratings.items()}
+        sends = {k: len(v) for k, v in user_ratings.items()}
+        idx = torch.tensor(list(max_grade.keys()), dtype=torch.long)
+        max_grade = torch.tensor(list(max_grade.values()), dtype=torch.float)
+        sends = torch.tensor(list(sends.values()), dtype=torch.float)
+        data["user"].x.t()[0][idx] = max_grade
+        data["user"].x.t()[3][idx] = sends
+
+        # update problem features
+        rs = torch.clone(data[("user", "rates", "problem")].edge_index)
+        rs[0] = data[("user", "rates", "problem")].edge_attr.t()[1]
+
+        for r, p in rs.t().tolist():
+            problem_ratings.setdefault(p, []).append(r)
+        avg_rating = {k: sum(v) / len(v) for k, v in problem_ratings.items()}
+        sends = {k: len(v) for k, v in problem_ratings.items()}
+        idx = torch.tensor(list(avg_rating.keys()), dtype=torch.long)
+        avg_rating = torch.tensor(list(avg_rating.values()), dtype=torch.float)
+        sends = torch.tensor(list(sends.values()), dtype=torch.float)
+        data["problem"].x.t()[1][idx] = avg_rating
+        data["problem"].x.t()[2][idx] = sends
+
         datasets.append(data)
+
+    # Feature standardization
+    if standardize:
+        for i, data in enumerate(datasets):
+            # User feature layout: highest_grade_idx, height, weight, problems_sent
+            user_x = data["user"].x
+            user_cont_cols = [0, 1, 2, 3] # Normalize all columns
+            if i == 0:
+                user_x, user_data = standardize_columns(user_x, user_cont_cols)
+            else:
+                mean = user_data["mean"]
+                std = user_data["std"]
+                user_x[:, user_cont_cols] = (user_x[:, user_cont_cols] - mean) / std
+            data["user"].x = user_x
+
+            # Problem feature layout: grade_idx, rating, num_sends, foot_rules (onehot)
+            problem_x = data["problem"].x
+            problem_cont_cols = [0, 1, 2] # We skip the one hot encoded features
+            problem_x, _ = standardize_columns(problem_x, problem_cont_cols)
+            if i == 0:
+                problem_x, problem_data = standardize_columns(problem_x, problem_cont_cols)
+            else:
+                mean = problem_data["mean"]
+                std = problem_data["std"]
+                problem_x[:, problem_cont_cols] = (problem_x[:, problem_cont_cols] - mean) / std
+            data["problem"].x = problem_x
 
     return datasets
 
@@ -382,6 +441,10 @@ def train(
             node_type: message_data[node_type].x.to(device)
             for node_type in message_data.node_types
         }
+        x_val = {
+            node_type: train_data[node_type].x.to(device)
+            for node_type in train_data.node_types
+        }
         edge_index = {
             edge_type: message_data[edge_type].edge_index.to(device)
             for edge_type in message_data.edge_types
@@ -403,6 +466,7 @@ def train(
         }
     else:
         x = torch.clone(message_data.x).to(device)
+        x_val = torch.clone(train_data.x).to(device)
         edge_index = torch.clone(message_data.edge_index).to(device)
         val_edge_index = torch.cat(
             [message_data.edge_index, train_data.edge_index], dim=1
@@ -481,7 +545,7 @@ def train(
         with torch.no_grad():
             # forward pass
             if features:
-                embed = model(x, val_edge_index)
+                embed = model(x_val, val_edge_index)
             else:
                 embed = model(val_edge_index)
             if hetero:

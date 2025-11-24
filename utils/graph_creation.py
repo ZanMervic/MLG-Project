@@ -96,6 +96,8 @@ def get_grade_mappings(users: dict, problems: dict):
             grades.add(p["grade"])
 
     grades = sorted(grades)
+    # put 'Not climbed' as lowest index
+    grades = [grades[-1], *grades[:-1]]
     grade_to_idx = {g: i for i, g in enumerate(grades)}
     return grade_to_idx
 
@@ -128,7 +130,6 @@ def users_feature_matrix(users: dict, user_ids: list, grade_to_idx: dict):
         user = users[uid]
 
         # All current numerical features
-        ranking = float(user["ranking"]) if user["ranking"] is not None else 0.0
         highest_grade_idx = float(grade_encoder(user["highest_grade"], grade_to_idx))
         height = float(user["height"]) if user["height"] is not None else 0.0
         weight = float(user["weight"]) if user["weight"] is not None else 0.0
@@ -138,7 +139,7 @@ def users_feature_matrix(users: dict, user_ids: list, grade_to_idx: dict):
         # bio =
 
         user_features.append(
-            [ranking, highest_grade_idx, height, weight, problems_sent]
+            [highest_grade_idx, height, weight, problems_sent]
         )
 
     user_x = torch.tensor(user_features, dtype=torch.float)
@@ -279,7 +280,7 @@ def standardize_columns(x: torch.Tensor, cols: list[int]):
     return x, {"mean": mean, "std": std, "cols": cols}
 
 
-def create_hetero_graph(holds_as_nodes=True, standardize=True):
+def create_hetero_graph(holds_as_nodes=True, standardize=False):
     """
     Create a heterogeneous graph using PyG's HeteroData structure.
     holds_as_nodes: whether to include holds as nodes in the graph
@@ -316,8 +317,8 @@ def create_hetero_graph(holds_as_nodes=True, standardize=True):
 
     # Feature standardization
     if standardize:
-        # User feature layout: ranking, highest_grade_idx, height, weight, problems_sent
-        user_cont_cols = [0, 1, 2, 3, 4] # Normalize all columns
+        # User feature layout: highest_grade_idx, height, weight, problems_sent
+        user_cont_cols = [0, 1, 2, 3] # Normalize all columns
         user_x, _ = standardize_columns(user_x, user_cont_cols)
 
         # Problem feature layout: grade_idx, rating, num_sends, foot_rules (onehot)
