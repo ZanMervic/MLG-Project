@@ -204,8 +204,15 @@ def main():
         # Use the same edge construction as in training for evaluation embeddings:
         # message + train edges for message passing (no leakage from val/test)
         if isinstance(message_data, HeteroData):
-            x_eval = {nt: message_data[nt].x.to(device) for nt in message_data.node_types}
-            edge_index_eval = {
+            x_eval_train = {nt: message_data[nt].x.to(device) for nt in message_data.node_types}
+            x_eval_val = {nt: train_data[nt].x.to(device) for nt in message_data.node_types}
+            x_eval_test = {nt: val_data[nt].x.to(device) for nt in message_data.node_types}
+            edge_index_eval_train = {
+                et: message_data[et].edge_index
+                .to(device)
+                for et in message_data.edge_types
+            }
+            edge_index_eval_val = {
                 et: torch.unique(
                     torch.cat(
                         [message_data[et].edge_index, train_data[et].edge_index],
@@ -215,28 +222,48 @@ def main():
                 ).t().to(device)
                 for et in message_data.edge_types
             }
+            edge_index_eval_test = {
+                et: torch.unique(
+                    torch.cat(
+                        [message_data[et].edge_index, train_data[et].edge_index, val_data[et].edge_index],
+                        dim=1,
+                    ).t(),
+                    dim=0,
+                ).t().to(device)
+                for et in message_data.edge_types
+            }
             hetero = True
         else:
-            x_eval = message_data.x.to(device)
-            edge_index_eval = torch.cat(
+            x_eval_train = message_data.x.to(device)
+            x_eval_val = train_data.x.to(device)
+            x_eval_test = val_data.x.to(device)
+            edge_index_eval_train = message_data.edge_index.to(device)
+            edge_index_eval_val = torch.cat(
                 [message_data.edge_index, train_data.edge_index], dim=1
+            ).to(device)
+            edge_index_eval_test = torch.cat(
+                [message_data.edge_index, train_data.edge_index, val_data.edge_index], dim=1
             ).to(device)
             hetero = False
 
         with torch.no_grad():
             if hetero:
-                embed_eval = best_model(x_eval, edge_index_eval)
+                embed_eval_train = best_model(x_eval_train, edge_index_eval_train)
+                embed_eval_val = best_model(x_eval_val, edge_index_eval_val)
+                embed_eval_test = best_model(x_eval_test, edge_index_eval_test)
             else:
-                embed_eval = best_model(edge_index_eval)
+                embed_eval_train = best_model(edge_index_eval_train)
+                embed_eval_val = best_model(edge_index_eval_val)
+                embed_eval_test = best_model(edge_index_eval_test)
 
         # Compute stats on each split
         train_edges = train_data[edge_type].edge_index.to(device)
         val_edges = val_data[edge_type].edge_index.to(device)
         test_edges = test_data[edge_type].edge_index.to(device)
 
-        train_stats = recall_at_k(embed_eval, train_edges, edge_type, k=20, hetero=hetero)
-        val_stats = recall_at_k(embed_eval, val_edges, edge_type, k=20, hetero=hetero)
-        test_stats = recall_at_k(embed_eval, test_edges, edge_type, k=20, hetero=hetero)
+        train_stats = recall_at_k(embed_eval_train, train_edges, edge_type, k=20, hetero=hetero)
+        val_stats = recall_at_k(embed_eval_val, val_edges, edge_type, k=20, hetero=hetero)
+        test_stats = recall_at_k(embed_eval_test, test_edges, edge_type, k=20, hetero=hetero)
 
         print(
             f"Train Recall@20: {train_stats['mean']:.4f} "
