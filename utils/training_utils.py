@@ -654,3 +654,117 @@ def train(
         "val_ci_high": None if best_val_stats is None else best_val_stats["ci_high"],
         "val_n_users": None if best_val_stats is None else best_val_stats["n_users"],
     }
+
+def evaluate_model(
+        model, 
+        message_data, 
+        train_data, 
+        val_data, 
+        test_data, 
+        edge_type=("user", "rates", "problem"),
+        state_dict_path=None, 
+        device="cpu"):
+    """
+    Evaluates the model on train, validation and test sets.
+
+    Args:
+        model: Hetero GNN producing embeddings per node type
+        message_data: HeteroData object for message passing
+        train_data: HeteroData object for train supervision
+        val_data: HeteroData object for validation 
+        test_data: HeteroData object for testing
+        edge_type: 3-tuple ('src_type', 'relation', 'dst_type')
+        state_dict_path: path to the stored weights for the model
+        device: 'cude' or 'cpu'
+    """
+    if state_dict_path is not None:
+        # Load best weights
+        state_dict = torch.load(state_dict_path, map_location=device)
+        model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+
+    # Use the same edge construction as in training for evaluation embeddings:
+    # message + train edges for message passing (no leakage from val/test)
+    if isinstance(message_data, HeteroData):
+        x_eval_train = {nt: message_data[nt].x.to(device) for nt in message_data.node_types}
+        x_eval_val = {nt: train_data[nt].x.to(device) for nt in message_data.node_types}
+        x_eval_test = {nt: val_data[nt].x.to(device) for nt in message_data.node_types}
+        edge_index_eval_train = {
+            et: message_data[et].edge_index
+            .to(device)
+            for et in message_data.edge_types
+        }
+        edge_index_eval_val = {
+            et: torch.unique(
+                torch.cat(
+                    [message_data[et].edge_index, train_data[et].edge_index],
+                    dim=1,
+                ).t(),
+                dim=0,
+            ).t().to(device)
+            for et in message_data.edge_types
+        }
+        edge_index_eval_test = {
+            et: torch.unique(
+                torch.cat(
+                    [message_data[et].edge_index, train_data[et].edge_index, val_data[et].edge_index],
+                    dim=1,
+                ).t(),
+                dim=0,
+            ).t().to(device)
+            for et in message_data.edge_types
+        }
+        hetero = True
+    else:
+        x_eval_train = message_data.x.to(device)
+        x_eval_val = train_data.x.to(device)
+        x_eval_test = val_data.x.to(device)
+        edge_index_eval_train = message_data.edge_index.to(device)
+        edge_index_eval_val = torch.cat(
+            [message_data.edge_index, train_data.edge_index], dim=1
+        ).to(device)
+        edge_index_eval_test = torch.cat(
+            [message_data.edge_index, train_data.edge_index, val_data.edge_index], dim=1
+        ).to(device)
+        hetero = False
+
+    with torch.no_grad():
+        if hetero:
+            embed_eval_train = model(x_eval_train, edge_index_eval_train)
+            embed_eval_val = model(x_eval_val, edge_index_eval_val)
+            embed_eval_test = model(x_eval_test, edge_index_eval_test)
+        else:
+            embed_eval_train = model(edge_index_eval_train)
+            embed_eval_val = model(edge_index_eval_val)
+            embed_eval_test = model(edge_index_eval_test)
+
+    # Compute stats on each split
+    train_edges = train_data[edge_type].edge_index.to(device)
+    val_edges = val_data[edge_type].edge_index.to(device)
+    test_edges = test_data[edge_type].edge_index.to(device)
+
+    train_stats = recall_at_k(embed_eval_train, train_edges, edge_type, k=20, hetero=hetero)
+    val_stats = recall_at_k(embed_eval_val, val_edges, edge_type, k=20, hetero=hetero)
+    test_stats = recall_at_k(embed_eval_test, test_edges, edge_type, k=20, hetero=hetero)
+
+    print(
+        f"Train Recall@20: {train_stats['mean']:.4f} "
+        f"(95% CI [{train_stats['ci_low']:.4f}, {train_stats['ci_high']:.4f}])"
+    )
+    print(
+        f"Val   Recall@20: {val_stats['mean']:.4f} "
+        f"(95% CI [{val_stats['ci_low']:.4f}, {val_stats['ci_high']:.4f}])"
+    )
+    print(
+        f"Test  Recall@20: {test_stats['mean']:.4f} "
+        f"(95% CI [{test_stats['ci_low']:.4f}, {test_stats['ci_high']:.4f}])"
+    )
+
+    best_eval = {
+        "train_stats": train_stats,
+        "val_stats": val_stats,
+        "test_stats": test_stats,
+    }
+
+    return best_eval
