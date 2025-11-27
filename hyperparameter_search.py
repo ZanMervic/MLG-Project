@@ -1,13 +1,13 @@
 import random
 import json
 import time
-import os
 import sys
 
 import torch
+from torch_geometric.data import HeteroData
 
 from utils.graph_creation import create_hetero_graph
-from utils.training_utils import train_val_test_split, train
+from utils.training_utils import train_val_test_split, train, recall_at_k
 from models.custom.custom import Custom  # adjust if your file/class name differs
 
 
@@ -73,9 +73,11 @@ def main():
     }
 
     # How many random configs to try (you can bump this up on HPC)
-    N_TRIALS = 20
+    N_TRIALS = 50
     RESULTS_PATH = "hyperparam_results.json"
-    BEST_PATH = "hyperparam_best.json"
+    BEST_PARAMS_PATH = "hyperparam_best.json"
+    BEST_MODEL_PATH = "hyperparam_best_model.pt"
+    BEST_MODEL_EVAL_PATH = "best_model_eval.json"
 
     best_config = None
     best_recall = -1.0
@@ -147,6 +149,7 @@ def main():
         if trial_best_recall > best_recall:
             best_recall = trial_best_recall
             best_config = cfg
+            torch.save(model.state_dict(), BEST_MODEL_PATH)
             print(f"*** New best config with Recall@20={best_recall:.4f} ***")
 
         # --- write incremental results to disk after each trial ---
@@ -154,7 +157,7 @@ def main():
             with open(RESULTS_PATH, "w") as f:
                 json.dump(results, f, indent=2)
 
-            with open(BEST_PATH, "w") as f:
+            with open(BEST_PARAMS_PATH, "w") as f:
                 json.dump(
                     {
                         "best_config": best_config,
@@ -175,9 +178,89 @@ def main():
     print(json.dumps(best_config, indent=2))
     print(f"Best validation Recall@20: {best_recall:.4f}")
 
-    # Optionally dump all results to a JSON file (for later analysis)
+    # save all results at the end as well
     with open("hyperparam_results_final.json", "w") as f:
         json.dump(results, f, indent=2)
+
+    # --- 5) Final evaluation of best model on train/val/test ---
+    if best_config is not None:
+        print("\nEvaluating best model on train/val/test splits...")
+        sys.stdout.flush()
+
+        # Rebuild model with best hyperparameters
+        best_model = build_model(
+            message_data=message_data,
+            hidden_channels=best_config["hidden_channels"],
+            output_lin=best_config["output_lin"],
+            num_layers=best_config["num_layers"],
+            dropout=best_config["dropout"],
+        )
+        # Load best weights
+        state_dict = torch.load(BEST_MODEL_PATH, map_location=device)
+        best_model.load_state_dict(state_dict)
+        best_model.to(device)
+        best_model.eval()
+
+        # Use the same edge construction as in training for evaluation embeddings:
+        # message + train edges for message passing (no leakage from val/test)
+        if isinstance(message_data, HeteroData):
+            x_eval = {nt: message_data[nt].x.to(device) for nt in message_data.node_types}
+            edge_index_eval = {
+                et: torch.unique(
+                    torch.cat(
+                        [message_data[et].edge_index, train_data[et].edge_index],
+                        dim=1,
+                    ).t(),
+                    dim=0,
+                ).t().to(device)
+                for et in message_data.edge_types
+            }
+            hetero = True
+        else:
+            x_eval = message_data.x.to(device)
+            edge_index_eval = torch.cat(
+                [message_data.edge_index, train_data.edge_index], dim=1
+            ).to(device)
+            hetero = False
+
+        with torch.no_grad():
+            if hetero:
+                embed_eval = best_model(x_eval, edge_index_eval)
+            else:
+                embed_eval = best_model(edge_index_eval)
+
+        # Compute stats on each split
+        train_edges = train_data[edge_type].edge_index.to(device)
+        val_edges = val_data[edge_type].edge_index.to(device)
+        test_edges = test_data[edge_type].edge_index.to(device)
+
+        train_stats = recall_at_k(embed_eval, train_edges, edge_type, k=20, hetero=hetero)
+        val_stats = recall_at_k(embed_eval, val_edges, edge_type, k=20, hetero=hetero)
+        test_stats = recall_at_k(embed_eval, test_edges, edge_type, k=20, hetero=hetero)
+
+        print(
+            f"Train Recall@20: {train_stats['mean']:.4f} "
+            f"(95% CI [{train_stats['ci_low']:.4f}, {train_stats['ci_high']:.4f}])"
+        )
+        print(
+            f"Val   Recall@20: {val_stats['mean']:.4f} "
+            f"(95% CI [{val_stats['ci_low']:.4f}, {val_stats['ci_high']:.4f}])"
+        )
+        print(
+            f"Test  Recall@20: {test_stats['mean']:.4f} "
+            f"(95% CI [{test_stats['ci_low']:.4f}, {test_stats['ci_high']:.4f}])"
+        )
+
+        # Store these results to disk
+        best_eval = {
+            "best_config": best_config,
+            "train_stats": train_stats,
+            "val_stats": val_stats,
+            "test_stats": test_stats,
+        }
+        with open(BEST_MODEL_EVAL_PATH, "w") as f:
+            json.dump(best_eval, f, indent=2)
+
     sys.stdout.flush()
 
 if __name__ == "__main__":

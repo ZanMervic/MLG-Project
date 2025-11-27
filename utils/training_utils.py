@@ -1,5 +1,6 @@
 from collections import Counter
 import random
+import math
 import networkx as nx
 import torch
 import torch.nn.functional as F
@@ -40,7 +41,7 @@ def train_val_test_split(
     train_p=0.1,
     val_p=0.1,
     by_user=True,
-    standardize=True
+    standardize=True,
 ):
     """
     Split a HeteroData dataset into message passing, training supervision, validation and testing HeteroData datasets
@@ -134,7 +135,7 @@ def train_val_test_split(
         for k, v in rev_edge_attrs.items():
             if k != "edge_index":
                 data[rev_type][k] = v[s:e]
-        
+
         # update user features
         rs = torch.clone(data[("user", "rates", "problem")].edge_index)
         rs[1] = data["problem"].x.t()[0][rs[1]]
@@ -170,7 +171,7 @@ def train_val_test_split(
         for i, data in enumerate(datasets):
             # User feature layout: highest_grade_idx, height, weight, problems_sent
             user_x = data["user"].x
-            user_cont_cols = [0, 1, 2, 3] # Normalize all columns
+            user_cont_cols = [0, 1, 2, 3]  # Normalize all columns
             if i == 0:
                 user_x, user_data = standardize_columns(user_x, user_cont_cols)
             else:
@@ -181,14 +182,18 @@ def train_val_test_split(
 
             # Problem feature layout: grade_idx, rating, num_sends, foot_rules (onehot)
             problem_x = data["problem"].x
-            problem_cont_cols = [0, 1, 2] # We skip the one hot encoded features
+            problem_cont_cols = [0, 1, 2]  # We skip the one hot encoded features
             problem_x, _ = standardize_columns(problem_x, problem_cont_cols)
             if i == 0:
-                problem_x, problem_data = standardize_columns(problem_x, problem_cont_cols)
+                problem_x, problem_data = standardize_columns(
+                    problem_x, problem_cont_cols
+                )
             else:
                 mean = problem_data["mean"]
                 std = problem_data["std"]
-                problem_x[:, problem_cont_cols] = (problem_x[:, problem_cont_cols] - mean) / std
+                problem_x[:, problem_cont_cols] = (
+                    problem_x[:, problem_cont_cols] - mean
+                ) / std
             data["problem"].x = problem_x
 
     return datasets
@@ -349,22 +354,9 @@ def create_edge_loader(
     return loader
 
 
-def recall_at_k(embed, edge_index_val, edge_type, k=20, hetero=True, num_users=None):
-    """
-    Compute Recall@K for user–item validation edges using precomputed embeddings.
-
-    Args:
-        embed (dict): Dictionary of node embeddings from model.forward().
-        edge_index_val (torch.Tensor): [2, num_val_edges] tensor of validation edges
-            (user->item relation).
-        user_type (str): Node type for users.
-        item_type (str): Node type for items.
-        k (int): Cutoff for Recall@K.
-        hetero: True if the model is heterogeneous, False if homogeneous
-
-    Returns:
-        float: Mean Recall@K across all users with at least one validation edge.
-    """
+def _per_user_recall(
+    embed, edge_index_val, edge_type, k=20, hetero=True, num_users=None
+):
     if hetero:
         user_emb = embed[edge_type[0]]  # shape [num_users, d]
         problem_emb = embed[edge_type[2]]  # shape [num_problems, d]
@@ -375,7 +367,7 @@ def recall_at_k(embed, edge_index_val, edge_type, k=20, hetero=True, num_users=N
     users, problems = edge_index_val
 
     if not hetero:
-        problems -= num_users
+        problems = problems - num_users
 
     # Group validation positives by user
     val_dict = {}
@@ -393,7 +385,52 @@ def recall_at_k(embed, edge_index_val, edge_type, k=20, hetero=True, num_users=N
         recall = hit_count / len(pos_items)
         recalls.append(recall)
 
-    return sum(recalls) / len(recalls)
+    return recalls
+
+
+def recall_at_k(
+    embed, edge_index_val, edge_type, k=20, hetero=True, num_users=None
+):
+    """
+    Compute Recall@K for user–item validation edges using precomputed embeddings.
+
+    Args:
+        embed (dict): Dictionary of node embeddings from model.forward().
+        edge_index_val (torch.Tensor): [2, num_val_edges] tensor of validation edges
+            (user->item relation).
+        user_type (str): Node type for users.
+        item_type (str): Node type for items.
+        k (int): Cutoff for Recall@K.
+        hetero: True if the model is heterogeneous, False if homogeneous
+
+
+    Returns:
+        dict: Dictionary with keys 'mean', 'std', 'n_users', 'ci_low', 'ci_high'.
+
+    """
+    recalls = _per_user_recall(
+        embed, edge_index_val, edge_type, k=k, hetero=hetero, num_users=num_users
+    )
+
+    n = len(recalls)
+    mean = sum(recalls) / n if n > 0 else 0.0
+    if n > 1:
+        var = sum((r - mean) ** 2 for r in recalls) / (n - 1)
+        std = math.sqrt(var)
+        se = std / math.sqrt(n)
+        ci_low = mean - 1.96 * se
+        ci_high = mean + 1.96 * se
+    else:
+        std = 0.0
+        ci_low = ci_high = mean
+
+    return {
+        "mean": float(mean),
+        "std": float(std),
+        "n_users": int(n),
+        "ci_low": float(ci_low),
+        "ci_high": float(ci_high),
+    }
 
 
 def train(
@@ -479,13 +516,16 @@ def train(
     ppr_edge_index, ppr_values = approximate_ppr_rw(
         message_data, train_data, include_holds=hetero
     )
-    hard_negatives = ppr_to_hard_negatives(ppr_edge_index, ppr_values, start=ppr_start, end=ppr_end)
+    hard_negatives = ppr_to_hard_negatives(
+        ppr_edge_index, ppr_values, start=ppr_start, end=ppr_end
+    )
 
     # training loop
     best_recall = -1.0
     best_epoch = -1
     epochs_no_improve = 0
     best_state_dict = None
+    best_val_stats = None
 
     print("Starting training...")
     for epoch in range(num_epochs):
@@ -557,8 +597,11 @@ def train(
                 embed_val = model(val_edge_index)
             if hetero:
                 pos_edge_index_val = val_data[edge_type].edge_index.to(device)
-                val_recall = recall_at_k(
-                    embed_val, pos_edge_index_val, edge_type, k=20
+                val_stats = recall_at_k(
+                    embed_val,
+                    pos_edge_index_val,
+                    edge_type,
+                    k=20,
                 )
             else:
                 pos_edge_index_val = torch.clone(val_data.edge_index)
@@ -566,7 +609,7 @@ def train(
                     :, val_data.node_type[pos_edge_index_val[0]] == 0
                 ]
                 num_users = message_data.node_type.tolist().count(0)
-                val_recall = recall_at_k(
+                val_stats = recall_at_k(
                     embed_val,
                     pos_edge_index_val,
                     edge_type,
@@ -575,7 +618,11 @@ def train(
                     num_users=num_users,
                 )
 
-        print(f"Validation Recall@20: {val_recall:.4f}")
+        val_recall = val_stats["mean"]
+        print(
+            f"Validation Recall@20: {val_recall:.4f} "
+            f"(95% CI [{val_stats['ci_low']:.4f}, {val_stats['ci_high']:.4f}])"
+        )
 
         # ---- early stopping check ----
         if val_recall > best_recall + early_stopping_min_delta:
@@ -586,6 +633,7 @@ def train(
             best_state_dict = {
                 k: v.detach().cpu().clone() for k, v in model.state_dict().items()
             }
+            best_val_stats = val_stats
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= early_stopping_patience:
@@ -602,4 +650,7 @@ def train(
     return {
         "best_recall": float(best_recall),
         "best_epoch": best_epoch + 1 if best_epoch >= 0 else None,
+        "val_ci_low": None if best_val_stats is None else best_val_stats["ci_low"],
+        "val_ci_high": None if best_val_stats is None else best_val_stats["ci_high"],
+        "val_n_users": None if best_val_stats is None else best_val_stats["n_users"],
     }
