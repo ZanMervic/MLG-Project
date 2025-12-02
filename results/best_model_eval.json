@@ -1,0 +1,35 @@
+{
+  "best_config": {
+    "hidden_channels": 128,
+    "num_layers": 2,
+    "output_lin": false,
+    "dropout": 0.0,
+    "lr": 0.0005,
+    "weight_decay": 1e-05,
+    "hn_increase_rate": 3,
+    "max_hn": 2,
+    "ppr_start": 20,
+    "ppr_end": 200
+  },
+  "train_stats": {
+    "mean": 0.29151945395840134,
+    "std": 0.38350032752101293,
+    "n_users": 19456,
+    "ci_low": 0.286130617152384,
+    "ci_high": 0.29690829076441866
+  },
+  "val_stats": {
+    "mean": 0.2599690192301595,
+    "std": 0.3782991339964721,
+    "n_users": 20103,
+    "ci_low": 0.2547395094188335,
+    "ci_high": 0.26519852904148555
+  },
+  "test_stats": {
+    "mean": 0.17690707183251686,
+    "std": 0.3199635297201158,
+    "n_users": 16565,
+    "ci_low": 0.17203447105282652,
+    "ci_high": 0.1817796726122072
+  }
+}

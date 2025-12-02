@@ -8,7 +8,7 @@ from torch_geometric.data import HeteroData
 
 from utils.graph_creation import create_hetero_graph
 from utils.training_utils import train_val_test_split, train, recall_at_k
-from models.custom.custom import Custom  # adjust if your file/class name differs
+from models.custom.custom import Custom
 
 
 def set_seed(seed: int = 42):
@@ -88,7 +88,7 @@ def main():
         print("\n" + "=" * 80)
         print(f"Trial {trial_idx}/{N_TRIALS}")
         print("Config:", cfg)
-        sys.stdout.flush() 
+        sys.stdout.flush()
 
         # --- 3) Build model & optimizer for this config ---
         model = build_model(
@@ -204,12 +204,17 @@ def main():
         # Use the same edge construction as in training for evaluation embeddings:
         # message + train edges for message passing (no leakage from val/test)
         if isinstance(message_data, HeteroData):
-            x_eval_train = {nt: message_data[nt].x.to(device) for nt in message_data.node_types}
-            x_eval_val = {nt: train_data[nt].x.to(device) for nt in message_data.node_types}
-            x_eval_test = {nt: val_data[nt].x.to(device) for nt in message_data.node_types}
+            x_eval_train = {
+                nt: message_data[nt].x.to(device) for nt in message_data.node_types
+            }
+            x_eval_val = {
+                nt: train_data[nt].x.to(device) for nt in message_data.node_types
+            }
+            x_eval_test = {
+                nt: val_data[nt].x.to(device) for nt in message_data.node_types
+            }
             edge_index_eval_train = {
-                et: message_data[et].edge_index
-                .to(device)
+                et: message_data[et].edge_index.to(device)
                 for et in message_data.edge_types
             }
             edge_index_eval_val = {
@@ -219,17 +224,25 @@ def main():
                         dim=1,
                     ).t(),
                     dim=0,
-                ).t().to(device)
+                )
+                .t()
+                .to(device)
                 for et in message_data.edge_types
             }
             edge_index_eval_test = {
                 et: torch.unique(
                     torch.cat(
-                        [message_data[et].edge_index, train_data[et].edge_index, val_data[et].edge_index],
+                        [
+                            message_data[et].edge_index,
+                            train_data[et].edge_index,
+                            val_data[et].edge_index,
+                        ],
                         dim=1,
                     ).t(),
                     dim=0,
-                ).t().to(device)
+                )
+                .t()
+                .to(device)
                 for et in message_data.edge_types
             }
             hetero = True
@@ -242,7 +255,8 @@ def main():
                 [message_data.edge_index, train_data.edge_index], dim=1
             ).to(device)
             edge_index_eval_test = torch.cat(
-                [message_data.edge_index, train_data.edge_index, val_data.edge_index], dim=1
+                [message_data.edge_index, train_data.edge_index, val_data.edge_index],
+                dim=1,
             ).to(device)
             hetero = False
 
@@ -261,9 +275,15 @@ def main():
         val_edges = val_data[edge_type].edge_index.to(device)
         test_edges = test_data[edge_type].edge_index.to(device)
 
-        train_stats = recall_at_k(embed_eval_train, train_edges, edge_type, k=20, hetero=hetero)
-        val_stats = recall_at_k(embed_eval_val, val_edges, edge_type, k=20, hetero=hetero)
-        test_stats = recall_at_k(embed_eval_test, test_edges, edge_type, k=20, hetero=hetero)
+        train_stats = recall_at_k(
+            embed_eval_train, train_edges, edge_type, k=20, hetero=hetero
+        )
+        val_stats = recall_at_k(
+            embed_eval_val, val_edges, edge_type, k=20, hetero=hetero
+        )
+        test_stats = recall_at_k(
+            embed_eval_test, test_edges, edge_type, k=20, hetero=hetero
+        )
 
         print(
             f"Train Recall@20: {train_stats['mean']:.4f} "
@@ -289,6 +309,7 @@ def main():
             json.dump(best_eval, f, indent=2)
 
     sys.stdout.flush()
+
 
 if __name__ == "__main__":
     main()
