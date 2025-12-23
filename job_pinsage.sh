@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mlg-gformer
+#SBATCH --job-name=mlg-pinsage
 #SBATCH --output=logs/mlg_%j.out
 #SBATCH --error=logs/mlg_%j.err
 #SBATCH --time=48:00:00
@@ -20,4 +20,4 @@ cd /d/hpc/projects/FRI/zm3587/mlg
 conda activate project-mlg
 
 # Finally launch
-python hyperparameter_search_gformer.py
+python hyperparameter_search_pinsage.py
