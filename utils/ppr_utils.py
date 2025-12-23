@@ -144,7 +144,7 @@ def approximate_ppr_rw(
     message_data,
     supervision_data,
     include_holds=True,
-    walks_per_user=10,
+    walks_per_user=50,
     walk_length=50,
 ):
     """

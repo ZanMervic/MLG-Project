@@ -63,10 +63,14 @@ def main():
         "hidden_channels": [32, 64, 128],
         "num_layers": [1, 2],
         "output_lin": [True, False],
-        "dropout": [0.0, 0.1, 0.2],
-        "lr": [0.01, 1e-3, 5e-4],
+        "dropout": [
+            0.0,
+            0.05,
+            0.1,
+        ],
+        "lr": [1e-3, 5e-4],
         "weight_decay": [1e-5, 1e-4],
-        "hn_increase_rate": [3, 5],
+        "hn_increase_rate": [2, 3, 5],
         "max_hn": [1, 2],
         "ppr_start": [10, 20],
         "ppr_end": [100, 200],
@@ -81,6 +85,7 @@ def main():
 
     best_config = None
     best_recall = -1.0
+    best_epoch_for_best_config = None
     results = []
 
     print(f"Starting hyperparameter search with {N_TRIALS} trials...")
@@ -149,6 +154,7 @@ def main():
         if trial_best_recall > best_recall:
             best_recall = trial_best_recall
             best_config = cfg
+            best_epoch_for_best_config = trial_best_epoch
             torch.save(model.state_dict(), BEST_MODEL_PATH)
             print(f"*** New best config with Recall@20={best_recall:.4f} ***")
 
@@ -162,6 +168,7 @@ def main():
                     {
                         "best_config": best_config,
                         "best_recall": best_recall,
+                        "best_epoch": best_epoch_for_best_config,
                         "trials_completed": trial_idx,
                     },
                     f,
@@ -187,6 +194,25 @@ def main():
         print("\nEvaluating best model on train/val/test splits...")
         sys.stdout.flush()
 
+        # Build a combined train+val supervision graph
+        if isinstance(train_data, HeteroData):
+            trainval_data = train_data.clone()
+            rev_type = (edge_type[2], f"rev_{edge_type[1]}", edge_type[0])
+
+            trainval_data[edge_type].edge_index = torch.cat(
+                [train_data[edge_type].edge_index, val_data[edge_type].edge_index],
+                dim=1,
+            )
+            trainval_data[rev_type].edge_index = torch.cat(
+                [train_data[rev_type].edge_index, val_data[rev_type].edge_index],
+                dim=1,
+            )
+        else:
+            trainval_data = train_data.clone()
+            trainval_data.edge_index = torch.cat(
+                [train_data.edge_index, val_data.edge_index], dim=1
+            )
+
         # Rebuild model with best hyperparameters
         best_model = build_model(
             message_data=message_data,
@@ -195,9 +221,39 @@ def main():
             num_layers=best_config["num_layers"],
             dropout=best_config["dropout"],
         )
-        # Load best weights
-        state_dict = torch.load(BEST_MODEL_PATH, map_location=device)
-        best_model.load_state_dict(state_dict)
+
+        optimizer = torch.optim.Adam(
+            best_model.parameters(),
+            lr=best_config["lr"],
+            weight_decay=best_config["weight_decay"],
+        )
+
+        # Retrain on train+val for exactly best_epoch_for_best_config epochs
+        num_epochs_final = (
+            best_epoch_for_best_config
+            if best_epoch_for_best_config is not None
+            else 200
+        )
+        _ = train(
+            model=best_model,
+            message_data=message_data,
+            train_data=trainval_data,
+            val_data=trainval_data,
+            edge_type=edge_type,
+            optimizer=optimizer,
+            hetero=True,
+            features=True,
+            device=device,
+            num_epochs=num_epochs_final,
+            batch_size=1024,
+            hn_increase_rate=best_config["hn_increase_rate"],
+            max_hn=best_config["max_hn"],
+            ppr_start=best_config["ppr_start"],
+            ppr_end=best_config["ppr_end"],
+            early_stopping_patience=num_epochs_final + 1,
+            early_stopping_min_delta=0.0,
+        )
+
         best_model.to(device)
         best_model.eval()
 
