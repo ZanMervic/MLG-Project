@@ -22,9 +22,7 @@ To reconstruct the holds used in each problem we captured images of every proble
 
 ### Dataset size and attributes
 
-(TODO: vpisat prave številke)
-
-At the time of writing we had collected [number_of_users] users, [number_of_problems] problems and [number_of_interactions] logged ascents. Each JSON entry contains all information needed to build our graphs. Below is a simplified example showing a user and a problem entry (formatted as JSON):
+At the time of writing we had collected 25865 users, 38663 problems and 1668865 logged ascents. Each JSON entry contains all information needed to build our graphs. Below is a simplified example showing a user and a problem entry (formatted as JSON):
 
 ```json
 // example user entry
@@ -90,18 +88,40 @@ Our models have different requirements. We therefore constructed two flavours of
 
 Some pre‑built models could not take our PyG heterographs directly. For example, GFormer does not accept a heterogeneous graph or node features; it instead requires an adjacency matrix. As a result we extracted the `(user, rates, problem)` edge list from the bipartite graph and built a normalised adjacency matrix for GFormer. By contrast, PinSAGE expects a bipartite graph and also cannot use features (Google pravi, da lahko uporablja featurje, spomin mi pravi da ne, preveri!). Only our custom models support the full heterogeneous graph with holds and rich features.
 
-### Temporal splitting and graph statistics
+### Temporal splitting (mogoče bolje prepustit Tadejusu?)
 
 Recommender systems are evaluated on their ability to predict future interactions. To mimic this we perform a temporal per‑user split: for each user we sort their interactions by time and allocate the earliest 70 % to a message‑passing set, then 10 % each to train, validation and test sets. The message‑passing edges are used to build node representations, while the train/val/test edges are withheld for loss optimisation and evaluation. This split ensures that the model never observes an edge at prediction time that occurred after an edge in its training set.
 
-When reporting the graph properties we provide the following statistics for the final dataset (TODO: vpisat prave številke):
+### Graph statistics
 
-- Number of user nodes: `[num_user_nodes]`
-- Number of problem nodes: `[num_problem_nodes]`
-- Number of hold nodes: `[num_hold_nodes]` (in the heterogeneous graph)
-- Number of user–problem edges: `[num_user_problem_edges]`
-- Number of problem–hold edges: `[num_problem_hold_edges]`
-- Graph diameter and density: `[graph_diameter]`, `[graph_density]`
+### Graph statistics
+
+To sanity-check our construction (and to give a feel for scale and sparsity), we computed a set of basic graph diagnostics. These numbers are useful for spotting obvious issues (e.g., disconnected subgraphs, unexpectedly dense connectivity), and they also help interpret model behavior—especially for message-passing GNNs where degree distributions and shortest-path distances matter. Unless noted otherwise, the statistics below refer to the **heterogeneous** graph; when the **bipartite** graph differs, we report both.
+
+#### Size and connectivity
+
+| Statistic | Heterogeneous graph | Bipartite graph |
+|---|---:|---:|
+| # user nodes | 25,826 | 25,826 |
+| # problem nodes | 34,572 | 34,572 |
+| # hold nodes | 198 | — |
+| # user–problem edges | 1,627,580 | 1,627,580 |
+| # problem–hold edges | 304,852 | — |
+| connected components | 1 | 6 |
+| diameter (largest component) | 6 | 7 |
+| density | 1.05257e-03 | 8.923483e-04 |
+| average clustering coefficient | 0 | 0 |
+
+> Note: A clustering coefficient of 0 is expected for bipartite-like graphs, since triangles generally cannot form when edges only connect across partitions.
+
+#### Degree statistics by node type
+
+| Node type | min degree | max degree | mean degree | median degree | std. dev. |
+|---|---:|---:|---:|---:|---:|
+| user | 1 | 3,000 | 63.02 | 20 | 118.73 |
+| problem | 3 | 14,861 | 55.90 | 12 | 459.03 |
+| hold *(heterogeneous only)* | 42 | 8,663 | 1,539.00 | 1,017.50 | 1,470.20 |
+
 
 The figure below illustrates the bipartite version of our graph: users connect to problems, with edges labelled by interactions (TODO, bolje opiši, ko bo slikca).
 
