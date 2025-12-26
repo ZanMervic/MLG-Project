@@ -2,6 +2,20 @@
 
 # Introduction (Vid)
 
+We set out to tackle a gap in the climbing community where no reliable recommendation system exists for standardized training boards such as the MoonBoard, KilterBoard, or Tension Board. These platforms have revolutionized how climbers train by providing globally standardized setups where thousands of problems are shared and logged through mobile apps. The MoonBoard, for instance, features a standardized 18×11 grid of climbing holds, with climbers creating problems by selecting start holds (marked in green), intermediate holds (marked in blue), and a finish hold (marked in red). Similar platforms like the KilterBoard and Tension Board follow comparable principles, creating rich ecosystems of user-generated climbing problems.
+
+![MoonBoard with climbing problems](.\\Report_images\\moonboard_problems.png)
+
+Predicting which problem a climber will tackle next is surprisingly complex. It involves understanding user preferences, problem difficulty, hold configurations, and climbing style all intertwined in ways that traditional recommendation methods struggle to capture. The challenge is compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, and the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling.
+
+![Presentation of a graph](.\\Report_images\\MLG_graph_2.png)
+
+In this project, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and Personalized PageRank negative sampling to handle sparse and dynamic data effectively.
+
+Our goal is to move beyond simple popularity-based recommendations that merely suggest the most-sent problems. Instead, we aim to deliver truly personalized suggestions that match each climber's unique preferences, skill level, and climbing style. By learning from the complex relationships between users, problems, and hold configurations, we hope to build a system that helps climbers discover problems they're likely to enjoy and succeed on, rather than just the ones everyone else is doing.
+
+The complete implementation, including data scraping tools, graph construction utilities, model implementations, and training pipelines, is available on GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project).
+
 # Dataset (Žan)
 
 (Uvod lahko še spremenim, glede na to kaj bo v introductionu)\
@@ -119,6 +133,20 @@ The figure below illustrates the heterogenous version of our graph: users again 
 
 ## Pinsage (Vid)
 
+PinSAGE, originally developed for Pinterest's recommendation system, adapts GraphSAGE to bipartite graphs for large-scale recommendation tasks. Unlike standard GraphSAGE which operates on homogeneous graphs, PinSAGE is designed to handle the bipartite structure of user–item interactions efficiently. The model uses neighbor sampling and message passing to learn node embeddings that capture both local graph structure and node features, making it well-suited for recommendation systems where we want to leverage both interaction patterns and node attributes.
+
+### How PinSAGE works in our pipeline
+
+PinSAGE operates on our bipartite user–problem graph using SAGEConv layers within a heterogeneous convolution framework. The model first projects user and problem node features into a shared hidden dimension, then performs multi-layer message passing where each layer aggregates information from neighboring nodes. Unlike GFormer, PinSAGE explicitly uses node features encoding user attributes like highest grade and demographics, and problem attributes like difficulty and popularity alongside the graph structure to learn embeddings. After message passing, the model applies a final linear transformation to produce user and problem embeddings in a common latent space, enabling recommendation via dot product similarity.
+
+In practice, integrating PinSAGE into our pipeline required several adaptations:
+
+- Graph structure – PinSAGE operates on the bipartite graph containing only user and problem nodes, without hold nodes. We use bidirectional edges `(user, rates, problem)` and `(problem, rev_rates, user)` to enable symmetric message passing in both directions.
+- Feature handling – The model uses linear projections to align user and problem features to a common hidden dimension before message passing, allowing us to leverage the rich node attributes we collected during data scraping.
+- Training approach – We train PinSAGE using BPR loss with Personalized PageRank-based hard negative sampling, progressively increasing the number of hard negatives during training to improve the model's ability to distinguish between similar problems.
+
+PinSAGE's strength lies in its ability to combine graph structure with node features effectively. The neighbor aggregation mechanism allows users and problems to influence each other's embeddings based on their connections, while the node features provide additional signal about user preferences and problem characteristics. In our experiments we tuned hyperparameters including hidden dimension, output dimension, and number of message passing layers to optimize performance on our MoonBoard dataset.
+
 ## GFormer (Žan)
 
 (Napisal ChatGPT, ker ne vem točno kako deluje GFormer, za preverit in popravit)
@@ -152,10 +180,55 @@ Evaluating a recommender system involves both hyper‑parameter tuning and robus
 
 # Results (Vid)
 
+After extensive hyperparameter tuning across 50 random trials for each model, we evaluated the best configurations on the held-out test set. Table 1 summarizes the test Recall@20 performance for all four models, along with 95% confidence intervals computed across all test users.
+
+| Model | Recall@20 | 95% CI | Std Dev |
+|-------|-----------|--------|---------|
+| **GFormer** | **0.189** | [0.183, 0.194] | 0.344 |
+| Custom (SAGEConv) | 0.174 | [0.169, 0.179] | 0.320 |
+| PinSAGE | 0.173 | [0.168, 0.178] | 0.321 |
+| CustomAttention | 0.162 | [0.157, 0.167] | 0.320 |
+
+*Table 1: Test set Recall@20 performance. All models were evaluated on 16,565 test users.*
+
+The hyperparameter search revealed that models generally benefited from moderate hidden dimensions (64–128), 2–3 message passing layers, and careful tuning of hard negative sampling parameters. Learning rates varied between 0.0005 and 0.002, with weight decay consistently set to 1e-5 or 1e-4. The optimal number of hard negatives per positive edge ranged from 1 to 2, with PPR-based sampling using ranks between 10–200.
+
+## Model Performance Analysis
+
+GFormer achieved the highest test Recall@20 of 0.189, outperforming the other models by a small but consistent margin. We attribute this success to GFormer's ability to capture long-range dependencies through its self-attention mechanism, which allows information to flow across the entire bipartite graph rather than being limited to local neighborhoods. Unlike the other models that rely on multi-hop message passing, GFormer's Transformer layer can directly attend to all nodes, potentially discovering more complex patterns in user–problem interactions.
+
+The Custom (SAGEConv) and PinSAGE models performed similarly (0.174 and 0.173 respectively), which is expected given their architectural similarities both use SAGEConv layers for neighbor aggregation. The slight edge of Custom over PinSAGE may stem from its ability to leverage the full heterogeneous graph structure with hold nodes, providing additional signal about problem characteristics through hold configurations.
+
+CustomAttention performed the lowest (0.162), which was somewhat surprising given that attention mechanisms often improve model expressiveness. However, the multi-head attention in this model operates locally within neighborhoods rather than globally, and the additional complexity may have led to overfitting or made optimization more challenging with our limited training data.
+
+## Limitations
+
+Our evaluation reveals several important limitations that should be considered when interpreting these results:
+
+**Data bias**: Our dataset is collected from publicly available MoonBoard logbooks, which may not represent the full diversity of the climbing community. Users who actively log their ascents may differ systematically from casual climbers in terms of skill level, motivation, or climbing style preferences. This selection bias could limit the generalizability of our recommendations to the broader climbing population.
+
+**Metric limitations**: Recall@20 measures whether a user's actual test problems appear in the top-20 recommendations, but it doesn't guarantee that the system is truly personalizing rather than just recommending popular problems. A model could achieve reasonable recall by consistently suggesting the most-sent problems, which would work well for users who haven't tried those problems yet but fails to provide genuine personalization. Our current evaluation doesn't distinguish between these scenarios, meaning a high Recall@20 doesn't necessarily indicate that the system understands individual user preferences beyond popularity patterns.
+
 # Conclusion
 
+We set out to address a significant gap in the climbing community: the lack of reliable recommendation systems for standardized training boards like the MoonBoard, KilterBoard, and Tension Board. The challenge lies in predicting which problems climbers will enjoy and succeed on, which requires understanding complex relationships between user preferences, problem difficulty, hold configurations, and climbing styles all intertwined in ways that traditional recommendation methods struggle to capture.
+
+Our MoonBoard Recommendation System demonstrates that Graph Machine Learning offers a promising approach to this problem. By modeling users, problems, and holds as nodes in a heterogeneous graph, we can leverage Graph Neural Networks to uncover hidden patterns in climbing behavior. Through extensive experimentation with multiple architectures PinSAGE, GFormer, and custom heterogeneous GNNs, we achieved test Recall@20 scores of up to 0.189, showing that personalized recommendations are feasible even with sparse climbing data.
+
+While our results are encouraging, they also highlight important limitations: data bias from public logbooks, missing nuanced preference information, and metric limitations that don't fully distinguish true personalization from popularity-based recommendations. Nevertheless, this work establishes a foundation for building recommendation systems that can help climbers discover problems tailored to their individual preferences and abilities, moving beyond simple popularity rankings.
+
 # Possible future work
+
+Several directions could extend and improve this work:
+
+- **Implementation to other platforms**: The graph-based approach we developed could be adapted to other standardized training boards like KilterBoard and Tension Board, or even extended to outdoor climbing route recommendation systems. The heterogeneous graph structure is flexible enough to accommodate different board layouts and problem formats.
+
+- **Usage of other technologies to tackle this problem**: Future work could explore additional techniques such as incorporating computer vision to automatically extract problem characteristics from images, using natural language processing to analyze user comments and problem descriptions, or leveraging reinforcement learning to adapt recommendations based on user feedback in real-time.
+
+- **Real-time user adaptation**: The current system provides static recommendations based on historical data. A promising direction would be to develop an adaptive system that updates recommendations as users log new ascents, learns from implicit feedback (time spent on problems, repeated attempts), and adjusts to changing user preferences and skill progression over time.
 
 # References
 
 Gformer: https://arxiv.org/abs/2306.02330
+GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project)
+
