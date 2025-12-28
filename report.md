@@ -1,23 +1,23 @@
 # Climbing the Graph: A GNN-Powered MoonBoard Recommendation System
 
 We set out to tackle a gap in the climbing community where no reliable recommendation system exists for standardized training boards such as the MoonBoard, KilterBoard, or Tension Board. These platforms have revolutionized how climbers train by providing globally standardized setups where thousands of problems are shared and logged through mobile apps. The MoonBoard, for instance, features a standardized 18×11 grid of climbing holds, with climbers creating problems by selecting start holds (marked in green), intermediate holds (marked in blue), and a finish hold (marked in red). Similar platforms like the KilterBoard and Tension Board follow comparable principles, creating rich ecosystems of user-generated climbing problems.
+
 <!-- To je samo ena "verzija/layout" moonboarda, obstajajo tudi druge ne 18x11 -->
 
 <!-- Tu bi blo kul omenit, da trenutno (iz izkušenj) vsi plezajo le najbolj popularne smeri, čeprav te mogoče niso najboljše/primerje za stil plezanja, ki ti je všeč in da je iskanje majn popularnih smeri smotano, to je dejanski problem, ki ga hočemo rešit -->
-
 
 <!-- TODO: dodaj sliko enega ki pleza/moonboard stene -->
 
 Predicting which problem a climber will tackle next is surprisingly complex. It involves understanding user preferences, problem difficulty, hold configurations, and climbing style all intertwined in ways that traditional recommendation methods struggle to capture. The challenge is compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, and the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling.
 
-![Presentation of a graph](.\\Report_images\\MLG_graph_2.png)
+![Presentation of a graph](.\Report_images\MLG_graph_2.png)
 
 In this project, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and random walk based negative sampling to handle sparse and dynamic data effectively.
 
 <!-- heterogeneous + bipartite -->
+
 - mogoče in this article namest in this project
 - ne delamo personalized pageranka ubistvu
-
 
 Our goal is to move beyond simple popularity-based recommendations that merely suggest the most-sent problems. Instead, we aim to deliver truly personalized suggestions that match each climber's unique preferences, skill level, and climbing style. By learning from the complex relationships between users, problems, and hold configurations, we hope to build a system that helps climbers discover problems they're likely to enjoy and succeed on, rather than just the ones everyone else is doing.
 
@@ -27,14 +27,7 @@ The complete implementation, including data scraping tools, graph construction u
 
 # Dataset (Žan)
 
-(Uvod lahko še spremenim, glede na to kaj bo v introductionu)\
-The MoonBoard is a globally standardised training board for climbers. Each board has 18 rows and 11 columns of climbing holds, and a climber solves a problem by moving from the start holds (circled in green) to a goal hold (circled in red). Climbers upload new problems and record their ascents via the official mobile app, which provides a global database of problems. Our goal was to build a recommender system that learns from this data, so the first step was to collect and organise it.
-
-
-- tole ne gre lepo iz introductiona v dataset
-<!-- to zmešajmo gor v intruduction -->
-
-
+There is no clean, publicly available dataset for MoonBoard activities and problems. To train and evaluate our models, we therefore built our own dataset by scraping publicly visible MoonBoard data (users, problems, and logged ascents) and then enriching it with additional problem structure by extracting hold positions from problem screenshots. The resulting JSON files form the basis for the graphs used throughout this project.
 
 ### Scraping the MoonBoard database
 
@@ -42,16 +35,18 @@ We built a Selenium‑based scraper that crawls the MoonBoard website and logboo
 
 - User attributes such as the climber’s highest grade, height, weight and the number of problems they have sent.
 - Problem metadata including the grade, average star rating, total number of ascents (`num_sends`), setter and any recorded foot rules.
-- Interaction details – the grade the user assigned to the problem, their rating, number of attempts and an optional comment, along with the date of the ascent.
+- Interaction details - the grade the user assigned to the problem, their rating, number of attempts and an optional comment, along with the date of the ascent.
 
 ### Processing problem images
 
 A big part of what makes a user like or dislike a climbing problem are the holds used and their arrangement, so we wanted to capture this information as well.
 To reconstruct the holds used in each problem we captured images of every problem using a script which runs the MoonBoard app on a device (for example, a phone or emulator) and captures a screenshot of each problem. We then used simple computer‑vision rules to detect the green, blue and red circles that mark the start, middle and end holds. Once located, the positions are converted into hold identifiers and saved in JSON files. These hold lists will later be used when constructing the heterogeneous graph.
 
-![MoonBoard with climbing problems](.\\Report_images\\moonboard_problems.png)
+![MoonBoard with climbing problems](.\Report_images\moonboard_problems.png)
 
-<!-- TODO: opis -->
+*Screenshots of MoonBoard problems used for hold extraction. Colored circles indicate detected start (green), middle (blue), and end (red) holds, which are converted into discrete hold identifiers for graph construction.*
+
+<!-- TODO: caption -->
 
 ### Dataset size and attributes
 
@@ -93,7 +88,7 @@ At the time of writing we had collected 25865 users, 38663 problems and 1668865 
 }
 ```
 
-<!-- TODO: opis JSON-a? -->
+*Sample JSON structure illustrating the schema for user profiles (including ascent history) and problem metadata (including hold configurations).*
 
 In summary, our dataset contains user metadata, problem metadata and a log of every ascent. We also store processed hold positions for each problem. These files serve as the starting point for constructing the various graphs used in the recommendation models.
 
@@ -105,28 +100,30 @@ Once we had the raw data, the next step was to convert it into graphs that our m
 
 We used PyTorch Geometric’s `HeteroData` container to assemble a single heterogeneous graph. The graph contains up to three node types:
 
-| Node type | Features | Description |
-|---|---|---|
-| user | `[highest_grade_idx, height, weight, problems_sent]` | Encodes climber ability and demographics. |
-| problem | `[grade, rating, num_sends, foot_rules]` | Captures problem difficulty, popularity and foot rules. |
-| hold (optional) | One‑hot identity vector | Uniquely identifies each board hold; used only in the heterogeneous version. |
+| Node type       | Features                                             | Description                                                                  |
+| --------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| user            | `[highest_grade_idx, height, weight, problems_sent]` | Encodes climber ability and demographics.                                    |
+| problem         | `[grade, rating, num_sends, foot_rules]`             | Captures problem difficulty, popularity and foot rules.                      |
+| hold (optional) | One‑hot identity vector                              | Uniquely identifies each board hold; used only in the heterogeneous version. |
 
-<!-- TODO: opis tabele -->
+*Overview of node types in the heterogeneous graph and their associated feature vectors, describing how climbers, problems, and holds are represented.*
 
-Edges connect these nodes in two ways. Each ascent produces a `(user, rates, problem)` edge with attributes `[grade, rating, attempts]` and a timestamp; a reverse edge `(problem, rev_rates, user)` is added to make message passing symmetric. When using hold nodes we also add `(problem, contains, hold)` edges with one‑hot flags indicating whether the hold is a start, middle or end hold, and the corresponding reverse edges `(hold, rev_contains, problem)`.
-<!-- tu bi za Edge lahko bla ista tabela kot za node -->
+<!-- Edges connect these nodes in two ways. Each ascent produces a `(user, rates, problem)` edge with attributes `[grade, rating, attempts]` and a timestamp; a reverse edge `(problem, rev_rates, user)` is added to make message passing symmetric. When using hold nodes we also add `(problem, contains, hold)` edges with one‑hot flags indicating whether the hold is a start, middle or end hold, and the corresponding reverse edges `(hold, rev_contains, problem)`. -->
 
+Edges encode climber-problem interactions and (optionally) which holds each problem uses. To make message passing symmetric, we add reverse edges for every relation.
 
+| Edge type                                                                          | Attributes                               | Description                                                                   |
+| ---------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `(user, rates, problem)` `(problem, rev_rates, user)`                              | `[grade, rating, attempts]`, `timestamp` | A logged ascent / interaction from a user to a problem.                       |
+| `(problem, contains, hold)` `(hold, rev_contains, problem)` _(heterogeneous only)_ | one‑hot `[is_start, is_middle, is_end]`  | Connects a problem to holds it uses and encodes the hold role in the problem. |
+
+*Overview of edge types and attributes connecting users, problems, and holds, including reverse relations for symmetric message passing.*
 
 ### Graph variations
 
 Our models have different requirements. We therefore constructed two types of graphs:
 
-- **Bipartite graph:** This contains only user and problem nodes with edges representing each logged ascent. The node feature matrices for users and problems are retained, but there are no hold nodes. This simpler structure is compatible with PinSAGE and with GFormer
-
-<!-- , which uses a normalised adjacency matrix rather than a PyG heterograph. For GFormer we convert the bipartite graph into a dense adjacency matrix and drop all node and edge features. -->
-
-<!-- Te detajle od GFormerja raje premaknit v sekcijo o GFormerju? -->
+- **Bipartite graph:** This contains only user and problem nodes with edges representing each logged ascent. The node feature matrices for users and problems are retained, but there are no hold nodes. This simpler structure is compatible with PinSAGE and with GFormer.
 
 - **Heterogeneous graph:** This version adds hold nodes connected to their respective problems. We keep all node features and edge attributes. This richer representation is used by our Custom and CustomAttention models, which operate on PyG HeteroData objects and can learn from multiple node and edge types.
 
@@ -136,50 +133,56 @@ To sanity-check our construction (and to give a feel for scale and sparsity), we
 
 #### Size and connectivity
 
-| Statistic | Heterogeneous graph | Bipartite graph |
-|---|---:|---:|
-| # user nodes | 25,826 | 25,826 |
-| # problem nodes | 34,572 | 34,572 |
-| # hold nodes | 198 | — |
-| # user–problem edges | 1,627,580 | 1,627,580 |
-| # problem–hold edges | 304,852 | — |
-| connected components | 1 | 6 |
-| diameter (largest component) | 6 | 7 |
-| density | 1.05257e-03 | 8.923483e-04 |
-| average clustering coefficient | 0 | 0 |
+| Statistic                      | Heterogeneous graph | Bipartite graph |
+| ------------------------------ | ------------------: | --------------: |
+| # user nodes                   |              25,826 |          25,826 |
+| # problem nodes                |              34,572 |          34,572 |
+| # hold nodes                   |                 198 |               / |
+| # user-problem edges           |           1,627,580 |       1,627,580 |
+| # problem-hold edges           |             304,852 |               / |
+| connected components           |                   1 |               6 |
+| diameter (largest component)   |                   6 |               7 |
+| density                        |         1.05257e-03 |    8.923483e-04 |
+| average clustering coefficient |                   0 |               0 |
 
+*Basic structural statistics of the heterogeneous and bipartite graphs, including node and edge counts, connectivity, diameter, density, and clustering coefficient.*
 > Note: A clustering coefficient of 0 is expected for bipartite-like graphs, since triangles generally cannot form when edges only connect across partitions.
 
 #### Degree statistics by node type
 
-| Node type | min degree | max degree | mean degree | median degree | std. dev. |
-|---|---:|---:|---:|---:|---:|
-| user | 1 | 3,000 | 63.02 | 20 | 118.73 |
-| problem | 3 | 14,861 | 55.90 | 12 | 459.03 |
-| hold *(heterogeneous only)* | 42 | 8,663 | 1,539.00 | 1,017.50 | 1,470.20 |
+| Node type                   | min degree | max degree | mean degree | median degree | std. dev. |
+| --------------------------- | ---------: | ---------: | ----------: | ------------: | --------: |
+| user                        |          1 |      3,000 |       63.02 |            20 |    118.73 |
+| problem                     |          3 |     14,861 |       55.90 |            12 |    459.03 |
+| hold _(heterogeneous only)_ |         42 |      8,663 |    1,539.00 |      1,017.50 |  1,470.20 |
 
+*Degree distribution statistics for each node type in the heterogeneous graph, showing connectivity patterns and variance across users, problems, and holds.*
 
 The figure below illustrates the bipartite version of our graph: users connect to problems, with edges labelled by interactions (TODO, bolje opiši, ko bo slikca).
 
-*(TODO: Slika/skica grafa)*
+![Bipartite graph](.\Report_images\bipartite.png)
+
+*Illustration of the bipartite graph representation, where user nodes connect to problem nodes via interaction edges representing logged ascents, with node features attached to users and problems.*
 
 The figure below illustrates the heterogenous version of our graph: users again connect to problems, however here, problems are also connected to holds (TODO, bolje opiši, ko bo slikca).
 
-*(TODO: Slika/skica grafa)*
+![Heterogeneous graph](.\Report_images\heterogeneous.png)
 
+*Illustration of the heterogeneous graph representation, extending the bipartite graph by adding hold nodes and problem–hold edges to explicitly model which holds are used in each problem.*
 ---
 
 # Approach (Tadeju)
 
 <!-- Tukaj bi kakšen "subsection" bil koristen, da se lažje znajdeš -->
 
-We frame the recommendation task as a link prediction problem on the graphs described above. Recommending new problems then corresponds to predicting which missing user–problem edges are most likely to appear in the future. Given a user together with their features and previously climbed problems the model assigns a score to each potential user–problem edge, estimating the likelihood of a future interaction. These scores are then used to rank all unclimbed problems for the user, forming the basis for our evaluation.
+We frame the recommendation task as a link prediction problem on the graphs described above. Recommending new problems then corresponds to predicting which missing user-problem edges are most likely to appear in the future. Given a user together with their features and previously climbed problems the model assigns a score to each potential user-problem edge, estimating the likelihood of a future interaction. These scores are then used to rank all unclimbed problems for the user, forming the basis for our evaluation.
+
 <!-- samo gpt uporablja tolko - -->
 <!-- Tej "—" so kar problematični, ker se res hitro vidi da je to chat napisal, raje zamenjat s "-" -->
 
 To evaluate the quality of these rankings, we use Recall@k. Recall@k measures how well the model retrieves relevant problems among its top-ranked predictions. For each user, the relevant set consists of the problems they actually climbed in the evaluation split. Given the model’s ranked list of all candidate problems, Recall@k is defined as the proportion of these relevant problems that appear within the top k positions, as illustrated in the figure below. Throughout this work, we report Recall@20 as our primary evaluation metric.
 
-*(TODO: Slika recall@k)*
+_(TODO: Slika recall@k)_
 
 But how do we obtain these rankings in the first place? To do so, we must first train our models, which requires carefully splitting the interaction graph into separate subgraphs for training and evaluation.
 
@@ -189,17 +192,16 @@ This per-user temporal split has several important advantages. First, it prevent
 
 The figure below shows an example split of a graph for link prediction.
 
-*(TODO: slikca spliti)*
+_(TODO: slikca spliti)_
 
 With these splits in place, we can begin training our models. Since Recall@k is not differentiable, it cannot be used directly as a training objective. Instead, we optimise the models using Bayesian Personalized Ranking(BPR) loss, which is specifically designed for pairwise ranking and aligns well with the goal of maximizing Recall@k. BPR is a pairwise ranking approach that trains the model to score observed interactions higher than unobserved ones. For each user, the model is presented with a positive example, such as a problem the user has climbed, and a negative example, such as a problem the user has not climbed. The training objective then encourages the model to assign a higher score to the positive interaction than to the negative one. This approach directly optimizes the relative ordering of items, making it well suited for recommendation tasks evaluated with metrics like Recall@k.
 
-Not all negative examples are equally informative for training. We distinguish between easy negatives (sampled uniformly from all unclimbed problems), which are problems the user has clearly not attempted, and hard negatives, which are problems the user has not climbed but are similar to ones they have. Relying only on easy negatives can make training too simple and less effective. For example, if a user has climbed mostly beginner problems, treating an advanced problem they would never attempt as a negative does not teach the model much about ranking relevant items. Hard negatives, in contrast, challenge the model to distinguish between problems the user might realistically climb and those they are unlikely to, leading to better ranking performance. 
+Not all negative examples are equally informative for training. We distinguish between easy negatives (sampled uniformly from all unclimbed problems), which are problems the user has clearly not attempted, and hard negatives, which are problems the user has not climbed but are similar to ones they have. Relying only on easy negatives can make training too simple and less effective. For example, if a user has climbed mostly beginner problems, treating an advanced problem they would never attempt as a negative does not teach the model much about ranking relevant items. Hard negatives, in contrast, challenge the model to distinguish between problems the user might realistically climb and those they are unlikely to, leading to better ranking performance.
 
 To obtain hard negatives, we simulate random walks on the training graphs starting from each user and count how many times each problem is visited. Problems that are visited more frequently are more closely connected to the user, either directly or through similar users, making them more likely to be relevant. We then rank the unclimbed problems by visit count and sample hard negatives randomly from a specified range of ranks. By focusing on these intermediate-ranked problems, the model is challenged to learn fine-grained distinctions between problems the user might actually climb and those they are unlikely to.
 
 <!-- ta celi Approch section bi lahko malo skrajšali... obvezno kaka slika, graf,...  -->
 <!-- Ne vem, če bi skrajšal, ker je kar pomembno, ampak definitivno razdelit na subsectione. -->
-
 
 # Models
 
@@ -207,19 +209,20 @@ With the training procedure, negative sampling strategy, and evaluation setup in
 
 ## Pinsage (Vid)
 
-PinSAGE, originally developed for Pinterest's recommendation system, adapts GraphSAGE to bipartite graphs for large-scale recommendation tasks. Unlike standard GraphSAGE which operates on homogeneous graphs, PinSAGE is designed to handle the bipartite structure of user–item interactions efficiently. The model uses neighbor sampling and message passing to learn node embeddings that capture both local graph structure and node features, making it well-suited for recommendation systems where we want to leverage both interaction patterns and node attributes.
+PinSAGE, originally developed for Pinterest's recommendation system, adapts GraphSAGE to bipartite graphs for large-scale recommendation tasks. Unlike standard GraphSAGE which operates on homogeneous graphs, PinSAGE is designed to handle the bipartite structure of user-item interactions efficiently. The model uses neighbor sampling and message passing to learn node embeddings that capture both local graph structure and node features, making it well-suited for recommendation systems where we want to leverage both interaction patterns and node attributes.
 
 ### How PinSAGE works in our pipeline
 
-PinSAGE operates on our bipartite user–problem graph using SAGEConv layers within a heterogeneous convolution framework. The model first projects user and problem node features into a shared hidden dimension, then performs multi-layer message passing where each layer aggregates information from neighboring nodes. Unlike GFormer, PinSAGE explicitly uses node features encoding user attributes like highest grade and demographics, and problem attributes like difficulty and popularity alongside the graph structure to learn embeddings. After message passing, the model applies a final linear transformation to produce user and problem embeddings in a common latent space, enabling recommendation via dot product similarity.
+PinSAGE operates on our bipartite user-problem graph using SAGEConv layers within a heterogeneous convolution framework. The model first projects user and problem node features into a shared hidden dimension, then performs multi-layer message passing where each layer aggregates information from neighboring nodes. Unlike GFormer, PinSAGE explicitly uses node features encoding user attributes like highest grade and demographics, and problem attributes like difficulty and popularity alongside the graph structure to learn embeddings. After message passing, the model applies a final linear transformation to produce user and problem embeddings in a common latent space, enabling recommendation via dot product similarity.
 
 In practice, integrating PinSAGE into our pipeline required several adaptations:
 
-- Graph structure – PinSAGE operates on the bipartite graph containing only user and problem nodes, without hold nodes. We use bidirectional edges `(user, rates, problem)` and `(problem, rev_rates, user)` to enable symmetric message passing in both directions.
-- Feature handling – The model uses linear projections to align user and problem features to a common hidden dimension before message passing, allowing us to leverage the rich node attributes we collected during data scraping.
-- Training approach – We train PinSAGE using BPR loss with Personalized PageRank-based hard negative sampling, progressively increasing the number of hard negatives during training to improve the model's ability to distinguish between similar problems.
+- Graph structure - PinSAGE operates on the bipartite graph containing only user and problem nodes, without hold nodes. We use bidirectional edges `(user, rates, problem)` and `(problem, rev_rates, user)` to enable symmetric message passing in both directions.
+- Feature handling - The model uses linear projections to align user and problem features to a common hidden dimension before message passing, allowing us to leverage the rich node attributes we collected during data scraping.
+- Training approach - We train PinSAGE using BPR loss with Personalized PageRank-based hard negative sampling, progressively increasing the number of hard negatives during training to improve the model's ability to distinguish between similar problems.
 
-<!-- Spet pozor na "–", to je hitro videt da je Chat napisal, zamenjat s "-" -->
+<!-- Spet pozor na "-", to je hitro videt da je Chat napisal, zamenjat s "-" -->
+
 - spet, nimamo PPR hard negativov ampak random walk based
 - pa tut nevem če je to res adaptation glede na to da povsod to delamo
 
@@ -230,75 +233,61 @@ PinSAGE's strength lies in its ability to combine graph structure with node feat
 
 ## GFormer (Žan)
 
-(Napisal ChatGPT, ker ne vem točno kako deluje GFormer, za preverit in popravit)
-<!-- tega jim jaz ne bi povedal-->
+Graph neural networks such as GraphSAGE and GAT aggregate information locally. To capture long‑range dependencies we experimented with Graph Transformers.
 
+We chose GFormer, a graph transformer for recommendation, due to its open source code, and recommendation specific Transformer architecture.
 
-Graph neural networks such as GraphSAGE and GAT aggregate information locally; to capture long‑range dependencies we experimented with Graph Transformers. The Heterogeneous Graph Transformer (HGT) proposed by Hu et al. introduces node‑ and edge‑type‑dependent parameters to learn attention over heterogeneous graphs. It also includes relative temporal encoding, allowing the model to capture time dynamics. Inspired by HGT, the GFormer model in our project combines a few GCN layers with a multi‑head self‑attention layer to learn latent representations for users and problems.
+At a high level, GFormer constructs node representations directly from the user-problem interaction matrix, without explicit neighborhood based message passing. A Transformer style self-attention mechanism is then applied, allowing nodes to attend globally to others in the graph and capture long-range dependencies.
 
-### How GFormer works in our pipeline
-
-GFormer treats the user–problem interaction graph as a fully connected bipartite graph. It first applies Graph Convolutional Network (GCN) layers to propagate information along the normalized adjacency matrix of the bipartite graph, producing intermediate embeddings. Then a Transformer layer aggregates these embeddings across all nodes using attention heads. Unlike our custom heterogeneous GNNs, GFormer ignores node features and instead relies solely on the pattern of interactions to learn high‑quality embeddings. This makes it particularly suited to sparse recommendation settings where interactions convey more information than demographic features.
-
-In practice, integrating GFormer into our pipeline required several adaptations:
-
-- Graph representation – because GFormer only supports two node types, we used the bipartite graph without hold nodes. We constructed a normalized adjacency matrix from the `(user, rates, problem)` edge list and passed it to the model wrapper.
-- Batching and memory – Transformer layers attend over all nodes, which can be memory intensive. We tuned the latent dimension, number of attention heads and number of GCN and Transformer layers to balance performance and hardware constraints.
-- Hybrid training – during training we still use the generic BPR loss and hard negative sampling described above. GFormer’s embeddings plug into our existing training loop without modification.
-
-While GFormer does not use node features, its self‑attention mechanism allows information to flow across the entire bipartite graph. In our experiments we tuned its hyper‑parameters (latent dimension, number of attention heads, GCN layers and Transformer layers) to find a configuration that works well on our data. The model runs efficiently on GPUs thanks to the sparse adjacency representation, but training still requires careful batching to avoid memory issues.
+In our setup, we applied GFormer to the user-problem bipartite graph, omitting hold nodes as well as all node and edge features. The graph was represented as a normalised adjacency matrix, which matches the input format expected by the model.
 
 <!-- Referenciraj članek -->
-<!-- Spremeni v en/dva odstavka, brez tistega subsectina -->
 
 ## Heterogeneous Models (Tadeju)
 
-Up to this point, our models have not made use of the additional structure available in the data, namely the fact that problems can be connected through the holds they share. While we already constructed a heterogeneous graph that captures these relationships, this structure cannot be handled by traditional recommender system models, which typically assume a simple user–item bipartite graph. As a result, leveraging this information requires us to design custom models that can operate directly on graphs with multiple node and edge types. 
+Up to this point, our models have not made use of the additional structure available in the data, namely the fact that problems can be connected through the holds they share. While we already constructed a heterogeneous graph that captures these relationships, this structure cannot be handled by traditional recommender system models, which typically assume a simple user-item bipartite graph. As a result, leveraging this information requires us to design custom models that can operate directly on graphs with multiple node and edge types.
 
-We define these heterogeneous GNN models by using edge-type-specific message passing functions, allowing the model to learn different transformations for user–problem interactions and problem–hold relationships. In our experiments, we evaluate two such architectures, one based on GraphSAGE layers and one based on GAT layers. As with our other models, we tune key hyperparameters such as the number of layers, latent dimension and, for attention-based models, the number of attention heads.
+We define these heterogeneous GNN models by using edge-type-specific message passing functions, allowing the model to learn different transformations for user-problem interactions and problem-hold relationships. In our experiments, we evaluate two such architectures, one based on GraphSAGE layers and one based on GAT layers. As with our other models, we tune key hyperparameters such as the number of layers, latent dimension and, for attention-based models, the number of attention heads.
 
 - a se vama zdi to mal kratko
-<!-- Mogoče je bolje da je kratko in bi bilo kul, da se use sectione modelov skrajša -->
-<!-- Tu bi bilo mogoče kul, še malo o sami implementaciji/strukturi in ideji modelov povedat, ker so edini, ki smo jih mi implementirali -->
-<!-- Specifične stvari za heterogene modele e.g. kako maš za vsak edge type svoj "pipeline" -->
+  <!-- Mogoče je bolje da je kratko in bi bilo kul, da se use sectione modelov skrajša -->
+  <!-- Tu bi bilo mogoče kul, še malo o sami implementaciji/strukturi in ideji modelov povedat, ker so edini, ki smo jih mi implementirali -->
+  <!-- Specifične stvari za heterogene modele e.g. kako maš za vsak edge type svoj "pipeline" -->
 
 # Evaluation (Žan)
 
 Evaluating a recommender system involves both hyper‑parameter tuning and robust metrics. Our evaluation pipeline operates as follows:
 
-1. Temporal splitting. We perform the 70/10/10/10 split described above (predvidevam da boš Tadej to opisal v Approach?), ensuring that training only uses information available before the interaction being predicted.
-2. Hyper‑parameter search. For each model we run a random search over learning rate, embedding dimension, number of layers, dropout, and model‑specific parameters such as the number of attention heads. Each trial trains the model on the training set using the BPR (Bayesian Personalized Ranking) loss with hard negative sampling; we stop early if the validation recall does not improve for a fixed number of epochs. Hard negatives are generated using Personalized PageRank random walks (A je to res? Ali samo simuliramo PPR? Sem pozabiu... samo random walks, brez PPR) to sample difficult non‑interacted problems.
+1. Temporal splitting. We perform the 70/10/10/10 split described above, ensuring that training only uses information available before the interaction being predicted.
+2. Hyper‑parameter search. For each model we run a random search over learning rate, embedding dimension, number of layers, dropout, and model‑specific parameters such as the number of attention heads. Each trial trains the model on the training set using the BPR loss.
 3. Training and early stopping. Within each trial we train the model for up to 200 epochs. We gradually increase the number of hard negatives per positive edge and apply early stopping if the validation recall plateaus. We use the Adam optimiser with weight decay and monitor recall@20 on the validation set.
-4. Full evaluation. After hyper‑parameter search we re‑train the best model on the combined training and validation set, then evaluate it on the held‑out test set. We report Recall@20 – the proportion of true held‑out problems that appear in the top‑20 recommendations – along with its 95 % confidence interval. Other metrics could be added if desired, but recall@20 is the metric used throughout our project.
-
-- pri custom pa gformer že neki omenjamo hyperparameter search, mogoče je tam odveč?
-<!-- TODO - zbriši zgoraj (pri GFromer in Custom) -->
+4. Full evaluation. After hyper‑parameter search we re‑train the best model on the combined training and validation set, then evaluate it on the held‑out test set. We report Recall@20 - the proportion of true held‑out problems that appear in the top‑20 recommendations - along with its 95 % confidence interval. Other metrics could be added if desired, but recall@20 is the metric used throughout our project.
 
 # Results (Vid)
 
 After extensive hyperparameter tuning across 50 random trials for each model, we evaluated the best configurations on the held-out test set. Table 1 summarizes the test Recall@20 performance for all four models, along with 95% confidence intervals computed across all test users.
 
-| Model | Recall@20 | 95% CI | Std Dev |
-|-------|-----------|--------|---------|
-| **GFormer** | **0.189** | [0.183, 0.194] | 0.344 |
-| Hetero (SAGEConv) | 0.174 | [0.169, 0.179] | 0.320 |
-| PinSAGE | 0.173 | [0.168, 0.178] | 0.321 |
-| Hetero Attention | 0.162 | [0.157, 0.167] | 0.320 |
+| Model             | Recall@20 | 95% CI         | Std Dev |
+| ----------------- | --------- | -------------- | ------- |
+| **GFormer**       | **0.189** | [0.183, 0.194] | 0.344   |
+| Hetero (SAGEConv) | 0.174     | [0.169, 0.179] | 0.320   |
+| PinSAGE           | 0.173     | [0.168, 0.178] | 0.321   |
+| Hetero Attention  | 0.162     | [0.157, 0.167] | 0.320   |
 
-*Table 1: Test set Recall@20 performance. All models were evaluated on 16,565 test users.*
+_Table 1: Test set Recall@20 performance. All models were evaluated on 16,565 test users._
 
 - men se zdi Heterogeneou lepše ime kot pa Custom
 <!-- Res je -->
 
-The hyperparameter search revealed that models generally benefited from moderate hidden dimensions (64–128), 2–3 message passing layers, and careful tuning of hard negative sampling parameters. Learning rates varied between 0.0005 and 0.002, with weight decay consistently set to 1e-5 or 1e-4. The optimal number of hard negatives per positive edge ranged from 1 to 2, with PPR-based sampling using ranks between 10–200.
+The hyperparameter search revealed that models generally benefited from moderate hidden dimensions (64-128), 2-3 message passing layers, and careful tuning of hard negative sampling parameters. Learning rates varied between 0.0005 and 0.002, with weight decay consistently set to 1e-5 or 1e-4. The optimal number of hard negatives per positive edge ranged from 1 to 2, with PPR-based sampling using ranks between 10-200.
 
 - nikjer nismo omenl našga baselinea
-<!-- Res je -->
-<!-- Pa "–" je spet treba zamenjat s "-" -->
+  <!-- Res je -->
+  <!-- Pa "-" je spet treba zamenjat s "-" -->
 
 ## Model Performance Analysis
 
-GFormer achieved the highest test Recall@20 of 0.189, outperforming the other models by a small but consistent margin. We attribute this success to GFormer's ability to capture long-range dependencies through its self-attention mechanism, which allows information to flow across the entire bipartite graph rather than being limited to local neighborhoods. Unlike the other models that rely on multi-hop message passing, GFormer's Transformer layer can directly attend to all nodes, potentially discovering more complex patterns in user–problem interactions.
+GFormer achieved the highest test Recall@20 of 0.189, outperforming the other models by a small but consistent margin. We attribute this success to GFormer's ability to capture long-range dependencies through its self-attention mechanism, which allows information to flow across the entire bipartite graph rather than being limited to local neighborhoods. Unlike the other models that rely on multi-hop message passing, GFormer's Transformer layer can directly attend to all nodes, potentially discovering more complex patterns in user-problem interactions.
 
 The Custom (SAGEConv) and PinSAGE models performed similarly (0.174 and 0.173 respectively), which is expected given their architectural similarities both use SAGEConv layers for neighbor aggregation. The slight edge of Custom over PinSAGE may stem from its ability to leverage the full heterogeneous graph structure with hold nodes, providing additional signal about problem characteristics through hold configurations.
 
@@ -338,7 +327,7 @@ Gformer: https://arxiv.org/abs/2306.02330
 GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project)
 
 <!-- TODO reference za:
-moonboard 
+moonboard
 Pinsage
 heterogene modele https://arxiv.org/pdf/1703.06103
 GraphSage?
