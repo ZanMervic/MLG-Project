@@ -149,6 +149,30 @@ The figure below illustrates the heterogenous version of our graph: users again 
 
 # Approach (Tadeju)
 
+We frame the recommendation task as a link prediction problem on the graphs described above. Recommending new problems then corresponds to predicting which missing user–problem edges are most likely to appear in the future. Given a user—together with their features and previously climbed problems—the model assigns a score to each potential user–problem edge, estimating the likelihood of a future interaction. These scores are then used to rank all unclimbed problems for the user, forming the basis for our evaluation.
+
+To evaluate the quality of these rankings, we use Recall@k. Recall@k measures how well the model retrieves relevant problems among its top-ranked predictions. For each user, the relevant set consists of the problems they actually climbed in the evaluation split. Given the model’s ranked list of all candidate problems, Recall@k is defined as the proportion of these relevant problems that appear within the top k positions, as illustrated in the figure below. Throughout this work, we report Recall@20 as our primary evaluation metric.
+
+*(TODO: Slika recall@k)*
+
+But how do we obtain these rankings in the first place? To do so, we must first train our models, which requires carefully splitting the interaction graph into separate subgraphs for training and evaluation.
+
+Since recommender systems are evaluated on their ability to predict future interactions, we apply a temporal per-user split. For each user, we sort their interactions chronologically and allocate the earliest 70% to a message-passing set, followed by 10% each to the training, validation, and test sets. The message-passing edges are used to build node representations, while the train, validation, and test edges are withheld for loss optimisation and evaluation.
+
+This per-user temporal split has several important advantages. First, it prevents user-level temporal leakage because the model is never trained on interactions that occur after the ones it is asked to predict. While this approach does not enforce a globally time-consistent graph, it still closely reflects how recommender systems are deployed in practice. Second, splitting per user rather than globally ensures that every user contributes data to all splits, which helps avoid cold-start effects in the validation and test sets. Finally, this setup mirrors the real-world recommendation scenario where a system must make predictions based only on a user’s past activity and adapt as new interactions arrive over time.
+
+The figure below shows an example split of a graph for link prediction.
+
+*(TODO: slikca spliti)*
+
+With these splits in place, we can begin training our models. Since Recall@k is not differentiable, it cannot be used directly as a training objective. Instead, we optimise the models using Bayesian Personalized Ranking (BPR), which is specifically designed for pairwise ranking and aligns well with the goal of maximizing Recall@k. BPR is a pairwise ranking approach that trains the model to score observed interactions higher than unobserved ones. For each user, the model is presented with a positive example, such as a problem the user has climbed, and a negative example, such as a problem the user has not climbed. The training objective then encourages the model to assign a higher score to the positive interaction than to the negative one. This approach directly optimizes the relative ordering of items, making it well suited for recommendation tasks evaluated with metrics like Recall@k.
+
+Not all negative examples are equally informative for training. We distinguish between easy negatives (sampled uniformly from all unclimbed problems), which are problems the user has clearly not attempted, and hard negatives, which are problems the user has not climbed but are similar to ones they have. Relying only on easy negatives can make training too simple and less effective. For example, if a user has climbed mostly beginner problems, treating an advanced problem they would never attempt as a negative does not teach the model much about ranking relevant items. Hard negatives, in contrast, challenge the model to distinguish between problems the user might realistically climb and those they are unlikely to, leading to better ranking performance. 
+
+To obtain hard negatives, we simulate random walks on the training graphs starting from each user and count how many times each problem is visited. Problems that are visited more frequently are more closely connected to the user, either directly or through similar users, making them more likely to be relevant. We then rank the unclimbed problems by visit count and sample hard negatives randomly from a specified range of ranks. By focusing on these intermediate-ranked problems, the model is challenged to learn fine-grained distinctions between problems the user might actually climb and those they are unlikely to.
+
+With the training procedure, negative sampling strategy, and evaluation setup in place, our framework is ready for model training and assessment. The next step is to describe the models we used and how they operate within this framework.
+
 # Models
 
 ## Pinsage (Vid)
@@ -186,6 +210,10 @@ In practice, integrating GFormer into our pipeline required several adaptations:
 While GFormer does not use node features, its self‑attention mechanism allows information to flow across the entire bipartite graph. In our experiments we tuned its hyper‑parameters (latent dimension, number of attention heads, GCN layers and Transformer layers) to find a configuration that works well on our data. The model runs efficiently on GPUs thanks to the sparse adjacency representation, but training still requires careful batching to avoid memory issues.
 
 ## Custom (Tadeju)
+
+Up to this point, our models have not made use of the additional structure available in the data, namely the fact that problems can be connected through the holds they share. While we already constructed a heterogeneous graph that captures these relationships, this structure cannot be handled by traditional recommender system models, which typically assume a simple user–item bipartite graph. As a result, leveraging this information requires us to design custom models that can operate directly on graphs with multiple node and edge types. 
+
+We define these heterogeneous GNN models by using edge-type-specific message passing functions, allowing the model to learn different transformations for user–problem interactions and problem–hold relationships. In our experiments, we evaluate two such architectures, one based on GraphSAGE layers and one based on GAT layers. As with our other models, we tune key hyperparameters such as the number of layers, latent dimension and, for attention-based models, the number of attention heads.
 
 ## Custom Attention (Tadeju)
 
