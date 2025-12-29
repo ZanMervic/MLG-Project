@@ -436,10 +436,6 @@ GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/
 
 Cover Image: https://thefrontclimbingclub.com/wp-content/uploads/2017/12/front-ogden-moonboard.jpg
 
-moonboard: https://moonclimbing.com/moonboard
-Pinsage: https://arxiv.org/abs/1806.01973v1
-heterogene modele: https://arxiv.org/pdf/1703.06103
-GraphSage: https://arxiv.org/abs/1706.02216v4
 
 
 <!-- TODO reference za:
