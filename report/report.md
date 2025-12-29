@@ -1,23 +1,25 @@
 # Climbing the Graph: A GNN-Powered MoonBoard Recommendation System
 
-We set out to tackle a gap in the climbing community where no reliable recommendation system exists for standardized training boards such as the MoonBoard, KilterBoard, or Tension Board. These platforms have revolutionized how climbers train by providing globally standardized setups where thousands of problems are shared and logged through mobile apps. The MoonBoard, for instance, features a standardized 18×11 grid of climbing holds, with climbers creating problems by selecting start holds (marked in green), intermediate holds (marked in blue), and a finish hold (marked in red). Similar platforms like the KilterBoard and Tension Board follow comparable principles, creating rich ecosystems of user-generated climbing problems.
+We set out to tackle a gap in the climbing community where no reliable recommendation system exists for standardized training boards such as the MoonBoard, KilterBoard, or Tension Board. These platforms have revolutionized how climbers train by providing globally standardized setups where thousands of problems are shared and logged through mobile apps. The MoonBoard, for instance, features a standardized grid of climbing holds (with different versions offering various layouts), with climbers creating problems by selecting start holds (marked in green), intermediate holds (marked in blue), and a finish hold (marked in red). Similar platforms like the KilterBoard and Tension Board follow comparable principles, creating rich ecosystems of user-generated climbing problems. However, in practice, climbers tend to gravitate toward the most popular problems, even though these may not be the best fit for their individual climbing style or preferences. Discovering less popular problems that match one's specific needs is challenging, requiring extensive manual browsing through thousands of options. This is precisely the problem we aim to solve: moving beyond popularity-based selection toward truly personalized recommendations that help climbers discover problems tailored to their unique preferences and abilities.
 
 <!-- To je samo ena "verzija/layout" moonboarda, obstajajo tudi druge ne 18x11 -->
 
 <!-- Tu bi blo kul omenit, da trenutno (iz izkušenj) vsi plezajo le najbolj popularne smeri, čeprav te mogoče niso najboljše/primerje za stil plezanja, ki ti je všeč in da je iskanje majn popularnih smeri smotano, to je dejanski problem, ki ga hočemo rešit -->
+![Presentation of a graph](.\images\cover_image.png)
 
 <!-- TODO: dodaj sliko enega ki pleza/moonboard stene -->
 
-Predicting which problem a climber will tackle next is surprisingly complex. It involves understanding user preferences, problem difficulty, hold configurations, and climbing style all intertwined in ways that traditional recommendation methods struggle to capture. The challenge is compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, and the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling.
+Building a recommendation system that goes beyond simple popularity rankings presents significant technical challenges. It requires understanding how user preferences, problem difficulty, hold configurations, and climbing style interact in ways that traditional recommendation methods struggle to capture. The challenge is further compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, making it difficult to identify patterns in individual preferences. Moreover, the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling to uncover the hidden connections that can help match climbers with problems they will genuinely enjoy.
 
 ![Presentation of a graph](.\images\MLG_graph_2.png)
 
-In this project, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and random walk based negative sampling to handle sparse and dynamic data effectively.
+In this article, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous and bipartite graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and random walk based negative sampling to handle sparse and dynamic data effectively.
 
-<!-- heterogeneous + bipartite -->
+<!-- heterogeneous + bipartite
 
 - mogoče in this article namest in this project
 - ne delamo personalized pageranka ubistvu
+-->
 
 Our goal is to move beyond simple popularity-based recommendations that merely suggest the most-sent problems. Instead, we aim to deliver truly personalized suggestions that match each climber's unique preferences, skill level, and climbing style. By learning from the complex relationships between users, problems, and hold configurations, we hope to build a system that helps climbers discover problems they're likely to enjoy and succeed on, rather than just the ones everyone else is doing.
 
@@ -437,6 +439,9 @@ Schlichtkrull, M., Kipf, T. N., Bloem, P., van den Berg, R., Titov, I., and Well
 
 Gformer: https://arxiv.org/abs/2306.02330
 GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project)
+
+Image: https://thefrontclimbingclub.com/wp-content/uploads/2017/12/front-ogden-moonboard.jpg
+
 
 <!-- TODO reference za:
 moonboard
