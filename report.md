@@ -169,9 +169,10 @@ The figure below illustrates the heterogenous version of our graph: users again 
 ![Heterogeneous graph](.\Report_images\heterogeneous.png)
 
 *Illustration of the heterogeneous graph representation, extending the bipartite graph by adding hold nodes and problem–hold edges to explicitly model which holds are used in each problem.*
+
 ---
 
-# Approach (Tadeju)
+# Approach
 
 <!-- Tukaj bi kakšen "subsection" bil koristen, da se lažje znajdeš -->
 
@@ -180,9 +181,15 @@ We frame the recommendation task as a link prediction problem on the graphs desc
 <!-- samo gpt uporablja tolko - -->
 <!-- Tej "—" so kar problematični, ker se res hitro vidi da je to chat napisal, raje zamenjat s "-" -->
 
+## Metrics
+
 To evaluate the quality of these rankings, we use Recall@k. Recall@k measures how well the model retrieves relevant problems among its top-ranked predictions. For each user, the relevant set consists of the problems they actually climbed in the evaluation split. Given the model’s ranked list of all candidate problems, Recall@k is defined as the proportion of these relevant problems that appear within the top k positions, as illustrated in the figure below. Throughout this work, we report Recall@20 as our primary evaluation metric.
 
-_(TODO: Slika recall@k)_
+![Recall@k example image](.\Report_images\recallatk.png)
+
+*An illustration showing how Recall@k is calculated.*
+
+## Splitting the graph
 
 But how do we obtain these rankings in the first place? To do so, we must first train our models, which requires carefully splitting the interaction graph into separate subgraphs for training and evaluation.
 
@@ -192,9 +199,15 @@ This per-user temporal split has several important advantages. First, it prevent
 
 The figure below shows an example split of a graph for link prediction.
 
-_(TODO: slikca spliti)_
+![Link prediction split](.\Report_images\splits.png)
 
-With these splits in place, we can begin training our models. Since Recall@k is not differentiable, it cannot be used directly as a training objective. Instead, we optimise the models using Bayesian Personalized Ranking(BPR) loss, which is specifically designed for pairwise ranking and aligns well with the goal of maximizing Recall@k. BPR is a pairwise ranking approach that trains the model to score observed interactions higher than unobserved ones. For each user, the model is presented with a positive example, such as a problem the user has climbed, and a negative example, such as a problem the user has not climbed. The training objective then encourages the model to assign a higher score to the positive interaction than to the negative one. This approach directly optimizes the relative ordering of items, making it well suited for recommendation tasks evaluated with metrics like Recall@k.
+*An example of a split for link prediction. Source: Stanford CS224W*
+
+## Loss function
+
+With these splits in place, we can begin training our models. Since Recall@k is not differentiable, it cannot be used directly as a training objective. Instead, we optimise the models using Bayesian Personalized Ranking (BPR) loss, which is specifically designed for pairwise ranking and aligns well with the goal of maximizing Recall@k. BPR is a pairwise ranking approach that trains the model to score observed interactions higher than unobserved ones. For each user, the model is presented with a positive example, such as a problem the user has climbed, and a negative example, such as a problem the user has not climbed. The training objective then encourages the model to assign a higher score to the positive interaction than to the negative one. This approach directly optimizes the relative ordering of items, making it well suited for recommendation tasks evaluated with metrics like Recall@k.
+
+## Negative sampling
 
 Not all negative examples are equally informative for training. We distinguish between easy negatives (sampled uniformly from all unclimbed problems), which are problems the user has clearly not attempted, and hard negatives, which are problems the user has not climbed but are similar to ones they have. Relying only on easy negatives can make training too simple and less effective. For example, if a user has climbed mostly beginner problems, treating an advanced problem they would never attempt as a negative does not teach the model much about ranking relevant items. Hard negatives, in contrast, challenge the model to distinguish between problems the user might realistically climb and those they are unlikely to, leading to better ranking performance.
 
@@ -243,13 +256,14 @@ In our setup, we applied GFormer to the user-problem bipartite graph, omitting h
 
 <!-- Referenciraj članek -->
 
-## Heterogeneous Models (Tadeju)
+## Heterogeneous Models
 
 Up to this point, our models have not made use of the additional structure available in the data, namely the fact that problems can be connected through the holds they share. While we already constructed a heterogeneous graph that captures these relationships, this structure cannot be handled by traditional recommender system models, which typically assume a simple user-item bipartite graph. As a result, leveraging this information requires us to design custom models that can operate directly on graphs with multiple node and edge types.
 
-We define these heterogeneous GNN models by using edge-type-specific message passing functions, allowing the model to learn different transformations for user-problem interactions and problem-hold relationships. In our experiments, we evaluate two such architectures, one based on GraphSAGE layers and one based on GAT layers. As with our other models, we tune key hyperparameters such as the number of layers, latent dimension and, for attention-based models, the number of attention heads.
+We define these heterogeneous GNN models (Schlichtkrull et al., 2018) by using edge-type-specific message passing functions, meaning that each edge type is associated with its own set of learnable weights and its own message passing architecture. This allows the model to apply different transformations to user-problem and problem-hold interactions, reflecting the different semantics of these connections. During message passing, nodes aggregate information from their neighbours using the transformation corresponding to the edge type, and the resulting messages are then combined to form a single representation.
 
-- a se vama zdi to mal kratko
+In our experiments, we evaluate two such architectures, one based on GraphSAGE layers (we call this model "Hetero") and one based on GAT layers (we call this model "Hetero Attention"). As with our other models, we tune key hyperparameters such as the number of layers, the latent dimension, and, for attention-based models, the number of attention heads.
+
   <!-- Mogoče je bolje da je kratko in bi bilo kul, da se use sectione modelov skrajša -->
   <!-- Tu bi bilo mogoče kul, še malo o sami implementaciji/strukturi in ideji modelov povedat, ker so edini, ki smo jih mi implementirali -->
   <!-- Specifične stvari za heterogene modele e.g. kako maš za vsak edge type svoj "pipeline" -->
@@ -322,6 +336,9 @@ Several directions could extend and improve this work:
 - **Real-time user adaptation**: The current system provides static recommendations based on historical data. A promising direction would be to develop an adaptive system that updates recommendations as users log new ascents, learns from implicit feedback (time spent on problems, repeated attempts), and adjusts to changing user preferences and skill progression over time.
 
 # References
+
+Schlichtkrull, M., Kipf, T. N., Bloem, P., van den Berg, R., Titov, I., and Welling, M. (2018).
+*Modeling Relational Data with Graph Convolutional Networks*.
 
 Gformer: https://arxiv.org/abs/2306.02330
 GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project)
