@@ -6,12 +6,14 @@ We set out to tackle a gap in the climbing community where no reliable recommend
 
 <!-- Tu bi blo kul omenit, da trenutno (iz izkušenj) vsi plezajo le najbolj popularne smeri, čeprav te mogoče niso najboljše/primerje za stil plezanja, ki ti je všeč in da je iskanje majn popularnih smeri smotano, to je dejanski problem, ki ga hočemo rešit -->
 ![Presentation of a graph](.\images\cover_image.png)
+*An example of the MoonBoard and a problem in the app*
 
 <!-- TODO: dodaj sliko enega ki pleza/moonboard stene -->
 
 Building a recommendation system that goes beyond simple popularity rankings presents significant technical challenges. It requires understanding how user preferences, problem difficulty, hold configurations, and climbing style interact in ways that traditional recommendation methods struggle to capture. The challenge is further compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, making it difficult to identify patterns in individual preferences. Moreover, the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling to uncover the hidden connections that can help match climbers with problems they will genuinely enjoy.
 
 ![Presentation of a graph](.\images\MLG_graph_2.png)
+*A visualization of the graph structure, showing the relationships between users, problems, and holds*
 
 In this article, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous and bipartite graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and random walk based negative sampling to handle sparse and dynamic data effectively.
 
@@ -248,26 +250,13 @@ def simulate_random_walks(
 
 With the training procedure, negative sampling strategy, and evaluation setup in place, our framework is ready for model training and assessment. The next step is to describe the models we used and how they operate within this framework.
 
-## Pinsage (Vid)
+## Pinsage
 
-PinSAGE, originally developed for Pinterest's recommendation system, adapts GraphSAGE to bipartite graphs for large-scale recommendation tasks. Unlike standard GraphSAGE which operates on homogeneous graphs, PinSAGE is designed to handle the bipartite structure of user-item interactions efficiently. The model uses neighbor sampling and message passing to learn node embeddings that capture both local graph structure and node features, making it well-suited for recommendation systems where we want to leverage both interaction patterns and node attributes.
+PinSAGE, originally developed for Pinterest's recommendation system, adapts GraphSAGE to bipartite graphs for large-scale recommendation tasks. Unlike standard GraphSAGE which operates on homogeneous graphs, PinSAGE is designed to handle the bipartite structure of user-item interactions efficiently.
 
-### How PinSAGE works in our pipeline
+PinSAGE operates on our bipartite user-problem graph using SAGEConv layers. The model projects user and problem node features into a shared hidden dimension, then performs multi-layer message passing where each layer aggregates information from neighboring nodes. Unlike GFormer, PinSAGE explicitly uses node features encoding user attributes like highest grade and demographics, and problem attributes like difficulty and popularity alongside the graph structure to learn embeddings. After message passing, the model applies a final linear transformation to produce user and problem embeddings in a common latent space, enabling recommendation via dot product similarity.
 
-PinSAGE operates on our bipartite user-problem graph using SAGEConv layers within a heterogeneous convolution framework. The model first projects user and problem node features into a shared hidden dimension, then performs multi-layer message passing where each layer aggregates information from neighboring nodes. Unlike GFormer, PinSAGE explicitly uses node features encoding user attributes like highest grade and demographics, and problem attributes like difficulty and popularity alongside the graph structure to learn embeddings. After message passing, the model applies a final linear transformation to produce user and problem embeddings in a common latent space, enabling recommendation via dot product similarity.
-
-In practice, integrating PinSAGE into our pipeline required several adaptations:
-
-- Graph structure - PinSAGE operates on the bipartite graph containing only user and problem nodes, without hold nodes. We use bidirectional edges `(user, rates, problem)` and `(problem, rev_rates, user)` to enable symmetric message passing in both directions.
-- Feature handling - The model uses linear projections to align user and problem features to a common hidden dimension before message passing, allowing us to leverage the rich node attributes we collected during data scraping.
-- Training approach - We train PinSAGE using BPR loss with Personalized PageRank-based hard negative sampling, progressively increasing the number of hard negatives during training to improve the model's ability to distinguish between similar problems.
-
-<!-- Spet pozor na "-", to je hitro videt da je Chat napisal, zamenjat s "-" -->
-
-- spet, nimamo PPR hard negativov ampak random walk based
-- pa tut nevem če je to res adaptation glede na to da povsod to delamo
-
-PinSAGE's strength lies in its ability to combine graph structure with node features effectively. The neighbor aggregation mechanism allows users and problems to influence each other's embeddings based on their connections, while the node features provide additional signal about user preferences and problem characteristics. In our experiments we tuned hyperparameters including hidden dimension, output dimension, and number of message passing layers to optimize performance on our MoonBoard dataset.
+We train PinSAGE using BPR loss with random walk-based hard negative sampling, progressively increasing the number of hard negatives during training.
 
 <!-- Referenciraj članek -->
 <!-- Spremeni v en/dva odstavka, brez tistega subsectina -->
@@ -374,12 +363,13 @@ Evaluating a recommender system involves both hyper‑parameter tuning and robus
 3. Training and early stopping. Within each trial we train the model for up to 200 epochs. We gradually increase the number of hard negatives per positive edge and apply early stopping if the validation recall plateaus. We use the Adam optimiser with weight decay and monitor recall@20 on the validation set.
 4. Full evaluation. After hyper‑parameter search we re‑train the best model on the combined training and validation set, then evaluate it on the held‑out test set. We report Recall@20 - the proportion of true held‑out problems that appear in the top‑20 recommendations - along with its 95 % confidence interval. Other metrics could be added if desired, but recall@20 is the metric used throughout our project.
 
-# Results (Vid)
+# Results
 
 After extensive hyperparameter tuning across 50 random trials for each model, we evaluated the best configurations on the held-out test set. Table 1 summarizes the test Recall@20 performance for all four models, along with 95% confidence intervals computed across all test users.
 
 | Model             | Recall@20 | 95% CI         | Std Dev |
 | ----------------- | --------- | -------------- | ------- |
+| Popularity baseline | 0.344     | [0.341, 0.347] | -       |
 | **GFormer**       | **0.189** | [0.183, 0.194] | 0.344   |
 | Hetero (SAGEConv) | 0.174     | [0.169, 0.179] | 0.320   |
 | PinSAGE           | 0.173     | [0.168, 0.178] | 0.321   |
@@ -387,24 +377,28 @@ After extensive hyperparameter tuning across 50 random trials for each model, we
 
 _Table 1: Test set Recall@20 performance. All models were evaluated on 16,565 test users._
 
+<!--
 - men se zdi Heterogeneou lepše ime kot pa Custom
-<!-- Res je -->
+ Res je -->
 
 The hyperparameter search revealed that models generally benefited from moderate hidden dimensions (64-128), 2-3 message passing layers, and careful tuning of hard negative sampling parameters. Learning rates varied between 0.0005 and 0.002, with weight decay consistently set to 1e-5 or 1e-4. The optimal number of hard negatives per positive edge ranged from 1 to 2, with PPR-based sampling using ranks between 10-200.
 
-- nikjer nismo omenl našga baselinea
-  <!-- Res je -->
-  <!-- Pa "-" je spet treba zamenjat s "-" -->
+As a baseline, we also evaluated a simple popularity-based approach that recommends the most-sent problems. This baseline achieved a Recall@20 of 0.344 ± 0.002881, significantly outperforming all our GNN models. While this result highlights the dominance of popular problems in the dataset, it also underscores the challenge of developing truly personalized recommendations that go beyond simple popularity rankings.
 
 ## Model Performance Analysis
 
-GFormer achieved the highest test Recall@20 of 0.189, outperforming the other models by a small but consistent margin. We attribute this success to GFormer's ability to capture long-range dependencies through its self-attention mechanism, which allows information to flow across the entire bipartite graph rather than being limited to local neighborhoods. Unlike the other models that rely on multi-hop message passing, GFormer's Transformer layer can directly attend to all nodes, potentially discovering more complex patterns in user-problem interactions.
+GFormer achieved the highest test Recall@20 of 0.189 among our GNN models, outperforming the other models by a small but consistent margin, though still falling short of the popularity baseline's 0.344. We attribute this success to GFormer's ability to capture long-range dependencies through its self-attention mechanism, which allows information to flow across the entire bipartite graph rather than being limited to local neighborhoods. Unlike the other models that rely on multi-hop message passing, GFormer's Transformer layer can directly attend to all nodes, potentially discovering more complex patterns in user-problem interactions.
 
 The Custom (SAGEConv) and PinSAGE models performed similarly (0.174 and 0.173 respectively), which is expected given their architectural similarities both use SAGEConv layers for neighbor aggregation. The slight edge of Custom over PinSAGE may stem from its ability to leverage the full heterogeneous graph structure with hold nodes, providing additional signal about problem characteristics through hold configurations.
 
-CustomAttention performed the lowest (0.162), which was somewhat surprising given that attention mechanisms often improve model expressiveness. However, the multi-head attention in this model operates locally within neighborhoods rather than globally, and the additional complexity may have led to overfitting or made optimization more challenging with our limited training data.
+<!-- To predvidevam da je chat napisal, tkoda bi blo kul preverit, če je res heh 
+- nikjer nismo omenl našga baselinea
+  <!-- Res je -->
+  <!-- Pa "-" je spet treba zamenjat s "-" -->
+  <!--
+- men se zdi Heterogeneou lepše ime kot pa Custom
+ Res je -->
 
-<!-- To predvidevam da je chat napisal, tkoda bi blo kul preverit, če je res heh -->
 
 ## Limitations
 
@@ -440,12 +434,17 @@ Schlichtkrull, M., Kipf, T. N., Bloem, P., van den Berg, R., Titov, I., and Well
 Gformer: https://arxiv.org/abs/2306.02330
 GitHub: [https://github.com/ZanMervic/MLG-Project](https://github.com/ZanMervic/MLG-Project)
 
-Image: https://thefrontclimbingclub.com/wp-content/uploads/2017/12/front-ogden-moonboard.jpg
+Cover Image: https://thefrontclimbingclub.com/wp-content/uploads/2017/12/front-ogden-moonboard.jpg
+
+moonboard: https://moonclimbing.com/moonboard
+Pinsage: https://arxiv.org/abs/1806.01973v1
+heterogene modele: https://arxiv.org/pdf/1703.06103
+GraphSage: https://arxiv.org/abs/1706.02216v4
 
 
 <!-- TODO reference za:
-moonboard
-Pinsage
-heterogene modele https://arxiv.org/pdf/1703.06103
-GraphSage?
+moonboard: https://moonclimbing.com/moonboard
+Pinsage: https://arxiv.org/abs/1806.01973v1
+heterogene modele: https://arxiv.org/pdf/1703.06103
+GraphSage: https://arxiv.org/abs/1706.02216v4
 -->
