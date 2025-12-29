@@ -213,6 +213,32 @@ Not all negative examples are equally informative for training. We distinguish b
 
 To obtain hard negatives, we simulate random walks on the training graphs starting from each user and count how many times each problem is visited. Problems that are visited more frequently are more closely connected to the user, either directly or through similar users, making them more likely to be relevant. We then rank the unclimbed problems by visit count and sample hard negatives randomly from a specified range of ranks. By focusing on these intermediate-ranked problems, the model is challenged to learn fine-grained distinctions between problems the user might actually climb and those they are unlikely to.
 
+```python
+def simulate_random_walks(
+    edges: torch.tensor, num_users: int, walks_per_user=10, walk_length=100
+):
+    """Simulate random walks on a graph given by edges starting at the first num_users nodes."""
+    users = torch.tensor(range(num_users))
+    batch_size = 500000 // (walks_per_user * walk_length)
+    ppr_edge_index, ppr_values = [], []
+    # batch random walks by users
+    for batch in users.split(batch_size):
+        start_users = batch.repeat_interleave(walks_per_user)
+        # simulate random walks using random_walk from torch_cluster
+        rw = random_walk(edges[0], edges[1], start=start_users, walk_length=walk_length)
+        # Flatten to get (source, target) pairs
+        user_ids = start_users.repeat_interleave(rw.size(1))
+        visited = rw.flatten()
+
+        # get counts
+        uniq, counts = torch.unique(
+            torch.stack([user_ids, visited], dim=0), dim=1, return_counts=True
+        )
+        ppr_edge_index.append(uniq)
+        ppr_values.append(counts)
+    return torch.cat(ppr_edge_index, dim=1), torch.cat(ppr_values)
+```
+
 <!-- ta celi Approch section bi lahko malo skrajšali... obvezno kaka slika, graf,...  -->
 <!-- Ne vem, če bi skrajšal, ker je kar pomembno, ampak definitivno razdelit na subsectione. -->
 
@@ -263,6 +289,75 @@ Up to this point, our models have not made use of the additional structure avail
 We define these heterogeneous GNN models (Schlichtkrull et al., 2018) by using edge-type-specific message passing functions, meaning that each edge type is associated with its own set of learnable weights and its own message passing architecture. This allows the model to apply different transformations to user-problem and problem-hold interactions, reflecting the different semantics of these connections. During message passing, nodes aggregate information from their neighbours using the transformation corresponding to the edge type, and the resulting messages are then combined to form a single representation.
 
 In our experiments, we evaluate two such architectures, one based on GraphSAGE layers (we call this model "Hetero") and one based on GAT layers (we call this model "Hetero Attention"). As with our other models, we tune key hyperparameters such as the number of layers, the latent dimension, and, for attention-based models, the number of attention heads.
+
+```python
+class Custom(nn.Module):
+    def __init__(self, hetero_data, hidden_channels=64, output_lin=False, num_layers=2, dropout=0.1):
+        super().__init__()
+
+        node_types, edge_types = hetero_data.metadata()
+        self.node_types = node_types
+        self.edge_types = edge_types
+        self.dropout = dropout
+
+        # 1) Linear "input" layer per node type: feature_dim -> hidden_channels
+        # This layers will project raw node features to a common hidden dimension
+        self.lin_dict = nn.ModuleDict()
+        for node_type in node_types:
+            # Get feature dim for this node type
+            in_channels = hetero_data[node_type].x.size(-1) 
+            # Create linear layer and store in dict
+            self.lin_dict[node_type] = nn.Linear(in_channels, hidden_channels)
+
+        # 2) Several HeteroConv layers for message passing
+        # HeteroConv allows us to define different conv layers per edge type
+        self.convs = nn.ModuleList()
+        for _ in range(num_layers):
+            conv_dict = {}
+            for edge_type in edge_types:
+                # edge_type is a tuple: (src_type, rel_name, dst_type)
+                conv_dict[edge_type] = SAGEConv(
+                    (-1, -1),  # infer input dims from x_dict at runtime
+                    hidden_channels,
+                )
+            self.convs.append(HeteroConv(conv_dict, aggr="sum"))
+
+        # 3) Final linear layers per node type (optional)
+        if output_lin:
+            self.lin_dict_out = nn.ModuleDict()
+            for node_type in node_types:
+                self.lin_dict_out[node_type] = nn.Linear(hidden_channels, hidden_channels)
+
+    def forward(self, x_dict, edge_index_dict):
+        # x_dict: {"user": user_x, "problem": problem_x, "hold": hold_x}
+        # edge_index_dict: {("user","rates","problem"): edge_index, ...}
+
+        # 1) Project raw features to hidden dim
+        h_dict = {}
+        for node_type, x in x_dict.items():
+            h = self.lin_dict[node_type](x)
+            h = F.relu(h)
+            h = F.dropout(h, p=self.dropout, training=self.training)
+            h_dict[node_type] = h
+
+        # 2) Message passing
+        for conv in self.convs:
+            h_dict = conv(h_dict, edge_index_dict)
+            # Apply non-linearity + dropout after each layer
+            for node_type in h_dict:
+                h = F.relu(h_dict[node_type])
+                h = F.dropout(h, p=self.dropout, training=self.training)
+                h_dict[node_type] = h
+
+        # 3) Final linear layer per node type (if defined)
+        if hasattr(self, 'lin_dict_out'):
+            for node_type in h_dict:
+                h = self.lin_dict_out[node_type](h_dict[node_type])
+                h_dict[node_type] = h
+
+        # 4) Return final node embeddings per type
+        return h_dict
+```
 
   <!-- Mogoče je bolje da je kratko in bi bilo kul, da se use sectione modelov skrajša -->
   <!-- Tu bi bilo mogoče kul, še malo o sami implementaciji/strukturi in ideji modelov povedat, ker so edini, ki smo jih mi implementirali -->
