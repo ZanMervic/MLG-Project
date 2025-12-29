@@ -50,13 +50,18 @@ End-to-end tooling to scrape MoonBoard climbing data, convert it into graph data
 │   ├── best_model_eval_gformer.json  # GFormer results
 │   └── best_model_eval_pinsage.json  # PinSAGE results
 │
-├── other/                        # Notebooks for experimentation
+├── notebooks/                        # Notebooks for experimentation
 │   ├── custom.ipynb                  # Custom model experiments
 │   ├── custom_attention.ipynb        # Attention model experiments
 │   ├── gformer.ipynb                 # GFormer experiments
 │   ├── lightGCN.ipynb                # LightGCN experiments
-│   └── testing.ipynb                 # General testing and exploration
+│   ├── pinsage.ipynb                 # PinSAGE testing, exploration and debugging
+│   └── data_graph_statistics.ipynb   # Data and graph statistics exploration
 │
+├── report/                           # Project report   
+│   ├── images/                         # Figures used in the report
+│   └── report.md                      # Project report document
+├── project_proposal.pdf          # Project proposal document
 ├── environment.yml               # Conda environment (mlg-project)
 ├── README.md
 └── .gitignore
@@ -362,11 +367,12 @@ Best **Test Recall@20** after hyperparameter search:
 
 | Notebook | Description |
 |----------|-------------|
-| `other/custom.ipynb` | Custom SAGEConv model experiments |
-| `other/custom_attention.ipynb` | Attention-based model experiments |
-| `other/gformer.ipynb` | GFormer training and evaluation |
-| `other/lightGCN.ipynb` | LightGCN baseline experiments |
-| `other/testing.ipynb` | General exploration and debugging |
+| `notebooks/custom.ipynb` | Custom SAGEConv model experiments |
+| `notebooks/custom_attention.ipynb` | Attention-based model experiments |
+| `notebooks/gformer.ipynb` | GFormer training and evaluation |
+| `notebooks/lightGCN.ipynb` | LightGCN baseline experiments |
+| `notebooks/pinsage.ipynb` | Pinsage testing, exploration and debugging |
+| `notebooks/data_graph_statistics.ipynb` | Data and graph statistics exploration |
 
 ---
 

@@ -10,7 +10,7 @@ We set out to tackle a gap in the climbing community where no reliable recommend
 
 Predicting which problem a climber will tackle next is surprisingly complex. It involves understanding user preferences, problem difficulty, hold configurations, and climbing style all intertwined in ways that traditional recommendation methods struggle to capture. The challenge is compounded by the sparse nature of climbing data: most users have only attempted a small fraction of available problems, and the relationships between users, problems, and holds form a rich, heterogeneous structure that demands sophisticated modeling.
 
-![Presentation of a graph](.\Report_images\MLG_graph_2.png)
+![Presentation of a graph](.\images\MLG_graph_2.png)
 
 In this project, we develop a MoonBoard Recommendation System that addresses this challenge using Graph Machine Learning. Our approach models users, problems, and holds as nodes in a heterogeneous graph, with interactions as edges, enabling us to uncover hidden patterns in climbing behavior that traditional collaborative filtering misses. We experiment with multiple Graph Neural Network architectures including PinSAGE, GFormer, and custom heterogeneous GNNs using techniques such as graph-based message passing and random walk based negative sampling to handle sparse and dynamic data effectively.
 
@@ -42,7 +42,7 @@ We built a Selenium‑based scraper that crawls the MoonBoard website and logboo
 A big part of what makes a user like or dislike a climbing problem are the holds used and their arrangement, so we wanted to capture this information as well.
 To reconstruct the holds used in each problem we captured images of every problem using a script which runs the MoonBoard app on a device (for example, a phone or emulator) and captures a screenshot of each problem. We then used simple computer‑vision rules to detect the green, blue and red circles that mark the start, middle and end holds. Once located, the positions are converted into hold identifiers and saved in JSON files. These hold lists will later be used when constructing the heterogeneous graph.
 
-![MoonBoard with climbing problems](.\Report_images\moonboard_problems.png)
+![MoonBoard with climbing problems](.\images\moonboard_problems.png)
 
 *Screenshots of MoonBoard problems used for hold extraction. Colored circles indicate detected start (green), middle (blue), and end (red) holds, which are converted into discrete hold identifiers for graph construction.*
 
@@ -160,13 +160,13 @@ To sanity-check our construction (and to give a feel for scale and sparsity), we
 
 The figure below illustrates the bipartite version of our graph: users connect to problems, with edges labelled by interactions (TODO, bolje opiši, ko bo slikca).
 
-![Bipartite graph](.\Report_images\bipartite.png)
+![Bipartite graph](.\images\bipartite.png)
 
 *Illustration of the bipartite graph representation, where user nodes connect to problem nodes via interaction edges representing logged ascents, with node features attached to users and problems.*
 
 The figure below illustrates the heterogenous version of our graph: users again connect to problems, however here, problems are also connected to holds (TODO, bolje opiši, ko bo slikca).
 
-![Heterogeneous graph](.\Report_images\heterogeneous.png)
+![Heterogeneous graph](.\images\heterogeneous.png)
 
 *Illustration of the heterogeneous graph representation, extending the bipartite graph by adding hold nodes and problem–hold edges to explicitly model which holds are used in each problem.*
 
@@ -185,7 +185,7 @@ We frame the recommendation task as a link prediction problem on the graphs desc
 
 To evaluate the quality of these rankings, we use Recall@k. Recall@k measures how well the model retrieves relevant problems among its top-ranked predictions. For each user, the relevant set consists of the problems they actually climbed in the evaluation split. Given the model’s ranked list of all candidate problems, Recall@k is defined as the proportion of these relevant problems that appear within the top k positions, as illustrated in the figure below. Throughout this work, we report Recall@20 as our primary evaluation metric.
 
-![Recall@k example image](.\Report_images\recallatk.png)
+![Recall@k example image](.\images\recallatk.png)
 
 *An illustration showing how Recall@k is calculated.*
 
@@ -199,7 +199,7 @@ This per-user temporal split has several important advantages. First, it prevent
 
 The figure below shows an example split of a graph for link prediction.
 
-![Link prediction split](.\Report_images\splits.png)
+![Link prediction split](.\images\splits.png)
 
 *An example of a split for link prediction. Source: Stanford CS224W*
 
